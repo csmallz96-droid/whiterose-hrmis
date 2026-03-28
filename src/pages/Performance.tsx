@@ -10,6 +10,7 @@ import type { Tables } from "@/integrations/supabase/types";
 import { formatDate } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import { downloadPerformanceHistoryReport } from "@/utils/employeeReports";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 
 type Appraisal = Tables<"appraisals">;
 
@@ -245,6 +246,36 @@ export default function Performance() {
                     <p className="text-sm text-card-foreground bg-muted/50 rounded p-3">{selected.comments}</p>
                   </div>
                 )}
+                {/* Score Trend Chart */}
+                {employeeHistory.filter((h) => h.final_score !== null).length > 1 && (() => {
+                  const chartData = [...employeeHistory]
+                    .filter((h) => h.final_score !== null || h.self_score !== null || h.manager_score !== null)
+                    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+                    .map((h) => ({
+                      period: h.period,
+                      Self: h.self_score ?? undefined,
+                      Manager: h.manager_score ?? undefined,
+                      Final: h.final_score ?? undefined,
+                    }));
+                  return (
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-2">Score Trend</p>
+                      <ResponsiveContainer width="100%" height={180}>
+                        <LineChart data={chartData} margin={{ top: 5, right: 10, bottom: 5, left: -20 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                          <XAxis dataKey="period" tick={{ fontSize: 10 }} />
+                          <YAxis domain={[0, 5]} tick={{ fontSize: 10 }} />
+                          <Tooltip formatter={(v: number) => v?.toFixed(2)} />
+                          <Legend wrapperStyle={{ fontSize: 11 }} />
+                          <Line type="monotone" dataKey="Self" stroke="#94a3b8" strokeWidth={1.5} dot={{ r: 3 }} />
+                          <Line type="monotone" dataKey="Manager" stroke="#2B3990" strokeWidth={1.5} dot={{ r: 3 }} />
+                          <Line type="monotone" dataKey="Final" stroke="#C8960C" strokeWidth={2} dot={{ r: 4 }} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  );
+                })()}
+
                 <div>
                   <p className="text-xs font-medium text-muted-foreground mb-2">Appraisal History</p>
                   <div className="space-y-2">
@@ -255,7 +286,7 @@ export default function Performance() {
                           <RatingBadge rating={historyItem.rating} />
                         </div>
                         <p className="text-xs text-muted-foreground mt-1">
-                          Final Score: {historyItem.final_score?.toFixed(2) ?? "-"} / 5 | Created {formatDate(historyItem.created_at.split("T")[0])}
+                          Final Score: {historyItem.final_score?.toFixed(2) ?? "-"} / 5 | Created {formatDate((historyItem.created_at ?? "").split("T")[0])}
                         </p>
                       </div>
                     ))}

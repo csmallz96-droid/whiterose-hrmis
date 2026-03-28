@@ -14,6 +14,9 @@ import { printPayslip, downloadPayslipPDF } from "@/utils/downloadPayslipPDF";
 
 const LEAVE_TYPES = ["Annual", "Sick", "Maternity", "Paternity", "Compassionate"];
 
+const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const fmtPeriod = (month: number, year: number) => `${MONTH_NAMES[(month ?? 1) - 1] ?? "?"} ${year ?? ""}`;
+
 const TABS = [
   { id: "payslips", label: "My Payslips", icon: Wallet },
   { id: "leave", label: "My Leave", icon: CalendarDays },
@@ -74,22 +77,25 @@ function PayslipsTab() {
             </div>
           </div>
 
-          {hasDbPayslips && payslips.slice(0, 12).map((ps) => (
-            <div key={ps.id as string} className="flex items-center justify-between rounded-lg border border-border bg-card p-4">
-              <div>
-                <p className="text-sm font-medium text-card-foreground">{ps.period as string}</p>
-                <p className="text-xs text-muted-foreground">Net Pay: <span className="font-semibold text-primary">{formatCurrency(ps.net_pay as number, 2)}</span></p>
+          {hasDbPayslips && payslips.slice(0, 12).map((ps) => {
+            const period = fmtPeriod(ps.period_month as number, ps.period_year as number);
+            return (
+              <div key={ps.id as string} className="flex items-center justify-between rounded-lg border border-border bg-card p-4">
+                <div>
+                  <p className="text-sm font-medium text-card-foreground">{period}</p>
+                  <p className="text-xs text-muted-foreground">Net Pay: <span className="font-semibold text-primary">{formatCurrency(ps.net_salary as number, 2)}</span></p>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" onClick={() => printPayslip(employee, branchName, period)}>
+                    <Printer className="mr-1 h-3.5 w-3.5" /> Print
+                  </Button>
+                  <Button size="sm" onClick={() => downloadPayslipPDF(employee, branchName, period)}>
+                    <Download className="mr-1 h-3.5 w-3.5" /> PDF
+                  </Button>
+                </div>
               </div>
-              <div className="flex gap-2">
-                <Button size="sm" variant="outline" onClick={() => printPayslip(employee, branchName, ps.period as string)}>
-                  <Printer className="mr-1 h-3.5 w-3.5" /> Print
-                </Button>
-                <Button size="sm" onClick={() => downloadPayslipPDF(employee, branchName, ps.period as string)}>
-                  <Download className="mr-1 h-3.5 w-3.5" /> PDF
-                </Button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -413,7 +419,7 @@ function ProfileTab() {
       <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
         <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">Statutory Information (Read-Only)</p>
         <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
-          {[["KRA PIN", employee.kra_pin], ["NSSF No.", employee.nssf_no], ["National ID", employee.national_id], ["SHA No.", employee.sha_no]].map(([l, v]) => (
+          {[["KRA PIN", employee.kra_pin], ["NSSF No.", employee.nssf_no], ["National ID", employee.national_id], ["NHIF No.", employee.nhif_no]].map(([l, v]) => (
             <div key={l as string}><p className="text-xs text-muted-foreground">{l}</p><p className="font-medium text-card-foreground">{v ?? "—"}</p></div>
           ))}
         </div>
