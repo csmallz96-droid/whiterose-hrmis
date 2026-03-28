@@ -40,6 +40,8 @@ export default function Login() {
       return;
     }
 
+    navigate("/", { replace: true });
+
   };
 
   return (

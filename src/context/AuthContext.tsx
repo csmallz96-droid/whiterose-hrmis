@@ -41,7 +41,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (data) {
       setEmployee(data);
       setRole(data.role ?? "employee");
+      return;
     }
+
+    setEmployee(null);
+    setRole("employee");
   };
 
   useEffect(() => {
@@ -51,18 +55,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (s?.user) {
         loadEmployee(s.user).finally(() => setLoading(false));
       } else {
+        setEmployee(null);
+        setRole("employee");
         setLoading(false);
       }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
+      setLoading(true);
       setSession(s);
       setUser(s?.user ?? null);
       if (s?.user) {
-        loadEmployee(s.user);
+        loadEmployee(s.user).finally(() => setLoading(false));
       } else {
         setEmployee(null);
         setRole("employee");
+        setLoading(false);
       }
     });
 
