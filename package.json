@@ -1,7 +1,9 @@
 {
   "name": "whiterose-hrmis",
-  "private": true,
   "version": "0.0.0",
+  "description": "Whiterose HRMIS — Internal HR Management System",
+  "author": "Whiterose Venyou Enterprises Limited",
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
