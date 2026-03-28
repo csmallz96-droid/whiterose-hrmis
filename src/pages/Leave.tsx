@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useBranches, useEmployees, useLeaveRequests } from "@/hooks/useSupabaseData";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/context/AuthContext";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -148,8 +150,9 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function Leave() {
   const { branches } = useBranches();
-  const { employees } = useEmployees();
+  const { employees, refetch: refetchEmployees } = useEmployees();
   const { leaveRequests, loading, error, updateStatus, addLeaveRequest } = useLeaveRequests();
+  const { employee: currentUser } = useAuth();
   const [statusFilter, setStatusFilter] = useState("all");
   const [branchFilter, setBranchFilter] = useState("all");
   const [showForm, setShowForm] = useState(false);
@@ -187,11 +190,21 @@ export default function Leave() {
   };
 
   const handleApprove = async (id: string) => {
-    await updateStatus(id, "Approved", "WR002");
+    const req = leaveRequests.find((r) => r.id === id);
+    await updateStatus(id, "Approved", currentUser?.id ?? "WR001");
+    // Decrement leave_balance for Annual leave
+    if (req && req.type === "Annual") {
+      const emp = employees.find((e) => e.id === req.employee_id);
+      if (emp) {
+        const newBalance = Math.max(0, emp.leave_balance - req.days);
+        await supabase.from("employees").update({ leave_balance: newBalance }).eq("id", emp.id);
+        refetchEmployees();
+      }
+    }
   };
 
   const handleReject = async (id: string) => {
-    await updateStatus(id, "Rejected", "WR002");
+    await updateStatus(id, "Rejected", currentUser?.id ?? "WR001");
   };
 
   return (

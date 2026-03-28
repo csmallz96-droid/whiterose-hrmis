@@ -1,6 +1,8 @@
 import { useState, useRef } from "react";
 import { useBranches, useEmployees, type Employee } from "@/hooks/useSupabaseData";
 import { calculatePayroll } from "@/data/mockData";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/context/AuthContext";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -118,9 +120,11 @@ function Payslip({ emp, branchName, period }: PayslipProps) {
 export default function Payroll() {
   const { branches } = useBranches();
   const { employees, loading, error } = useEmployees();
+  const { employee: currentUser } = useAuth();
   const [branchFilter, setBranchFilter] = useState("all");
   const [selectedEmp, setSelectedEmp] = useState<Employee | null>(null);
   const [runDone, setRunDone] = useState(false);
+  const [running, setRunning] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
 
   const filtered = branchFilter === "all" ? employees : employees.filter((e) => e.branch_id === branchFilter);
@@ -181,6 +185,52 @@ export default function Payroll() {
     URL.revokeObjectURL(url);
   };
 
+  // Run payroll — save to payroll_runs + payslips
+  const handleRunPayroll = async () => {
+    if (runDone) return;
+    setRunning(true);
+    const period = CURRENT_MONTH;
+    // Insert payroll_run record
+    const { data: runData, error: runErr } = await supabase.from("payroll_runs").insert({
+      period,
+      run_by: currentUser?.id ?? null,
+      status: "approved",
+      total_gross: totals.gross,
+      total_net: totals.net,
+      total_paye: totals.paye,
+      total_nssf: totals.nssf,
+      total_sha: totals.sha,
+      total_ahl: totals.ahl,
+      total_nita: totals.nita,
+    }).select("id").single();
+
+    if (!runErr && runData) {
+      const payslipRecords = employees.map((emp) => {
+        const p = calculatePayroll(emp);
+        return {
+          employee_id: emp.id,
+          payroll_run_id: runData.id,
+          period,
+          gross_pay: p.gross,
+          net_pay: p.netPay,
+          paye: p.paye,
+          nssf_employee: p.nssf.employee,
+          nssf_employer: p.nssf.employer,
+          sha: p.sha,
+          ahl_employee: p.ahl.employee,
+          ahl_employer: p.ahl.employer,
+          nita: p.nita.employee,
+          basic_salary: emp.basic_salary,
+          house_allowance: emp.house_allowance,
+          transport_allowance: emp.transport_allowance,
+        };
+      });
+      await supabase.from("payslips").insert(payslipRecords);
+    }
+    setRunning(false);
+    setRunDone(true);
+  };
+
   // Print payslip
   const handlePrint = () => {
     const content = printRef.current?.innerHTML;
@@ -214,8 +264,8 @@ export default function Payroll() {
           <Button variant="outline" onClick={downloadCSV}>
             <Download className="mr-2 h-4 w-4" /> Download CSV
           </Button>
-          <Button onClick={() => setRunDone(true)} disabled={runDone}>
-            {runDone ? "Payroll Run ✓" : "Run Payroll"}
+          <Button onClick={handleRunPayroll} disabled={runDone || running}>
+            {running ? "Processing…" : runDone ? "Payroll Run ✓" : "Run Payroll"}
           </Button>
         </div>
       </div>

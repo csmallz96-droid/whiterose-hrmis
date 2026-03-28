@@ -7,8 +7,15 @@ const PAGE_TITLES: Record<string, string> = {
   "/": "Dashboard",
   "/employees": "Employees",
   "/payroll": "Payroll",
+  "/payslips": "Payslips",
   "/leave": "Leave",
+  "/contracts": "Contracts",
+  "/performance": "Performance",
   "/self-service": "Self-Service",
+  "/reports": "Reports",
+  "/onboarding": "Onboarding",
+  "/expenses": "Expenses",
+  "/settings": "Settings",
 };
 
 export default function AppLayout() {
@@ -20,9 +27,8 @@ export default function AppLayout() {
     <div className="min-h-screen bg-background">
       <AppSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-      {/* Main content — offset by sidebar on large screens */}
       <div className="lg:pl-64 flex flex-col min-h-screen">
-        {/* Top bar (mobile only — shows hamburger + page title) */}
+        {/* Mobile top bar */}
         <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-border bg-background/95 backdrop-blur px-4 lg:hidden">
           <button
             onClick={() => setSidebarOpen(true)}

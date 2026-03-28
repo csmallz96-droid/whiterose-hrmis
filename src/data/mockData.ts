@@ -5,30 +5,28 @@ import type { Employee } from "@/hooks/useSupabaseData";
 export type { Employee };
 
 // Kenyan PAYE Tax Bands (Monthly) — Finance Act 2023/2024
-// Bands: 10% on first 24,000 | 25% on next 8,333 | 30% on next 467,667 | 32.5% on next 300,000 | 35% above
-export function calculatePAYE(grossIncome: number): number {
-  const bands = [
-    { limit: 24000, rate: 0.10 },
-    { limit: 8333, rate: 0.25 },
-    { limit: 467667, rate: 0.30 },
-    { limit: 300000, rate: 0.325 },
-    { limit: Infinity, rate: 0.35 },
-  ];
+// Cumulative band calculation with KES 2,400 personal relief
+export function calculatePAYE(taxableIncome: number): number {
   let tax = 0;
-  let remaining = grossIncome;
-  for (const band of bands) {
-    if (remaining <= 0) break;
-    const taxable = Math.min(remaining, band.limit);
-    tax += taxable * band.rate;
-    remaining -= taxable;
+  if (taxableIncome <= 24000) {
+    tax = taxableIncome * 0.10;
+  } else if (taxableIncome <= 32333) {
+    tax = 2400 + (taxableIncome - 24000) * 0.25;
+  } else if (taxableIncome <= 500000) {
+    tax = 4483.25 + (taxableIncome - 32333) * 0.30;
+  } else if (taxableIncome <= 800000) {
+    tax = 144483.25 + (taxableIncome - 500000) * 0.325;
+  } else {
+    tax = 241983.25 + (taxableIncome - 800000) * 0.35;
   }
-  const personalRelief = 2400;
-  return Math.max(0, tax - personalRelief);
+  return Math.max(0, tax - 2400);
 }
 
-// NSSF: 6% of gross, employee portion capped at KES 1,080
+// NSSF: Tiered — Tier I: 6% of first 7,000 (capped KES 420); Tier II: 6% of 7,001–18,000 (capped KES 660); total max KES 1,080
 export function calculateNSSF(grossSalary: number): { employee: number; employer: number } {
-  const contribution = Math.min(grossSalary * 0.06, 1080);
+  const tier1 = Math.min(grossSalary, 7000) * 0.06;         // max 420
+  const tier2 = Math.max(0, Math.min(grossSalary, 18000) - 7000) * 0.06; // max 660
+  const contribution = tier1 + tier2;                        // max 1,080
   return { employee: contribution, employer: contribution };
 }
 

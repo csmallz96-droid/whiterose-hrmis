@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useEmployees, useLeaveRequests, useBranches } from "@/hooks/useSupabaseData";
+import { useLeaveRequests, useBranches } from "@/hooks/useSupabaseData";
 import { calculatePayroll } from "@/data/mockData";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,28 +8,25 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { UserCircle, Wallet, CalendarDays, FileText, Plus } from "lucide-react";
 import { formatDate, formatCurrency } from "@/lib/utils";
+import { useAuth } from "@/context/AuthContext";
 
 const LEAVE_TYPES = ["Annual", "Sick", "Maternity", "Paternity", "Compassionate"];
 
 export default function SelfService() {
-  const { employees, loading: empLoading } = useEmployees();
+  const { employee: currentUser, loading: authLoading } = useAuth();
   const { branches } = useBranches();
   const { leaveRequests, addLeaveRequest } = useLeaveRequests();
-  const [selectedId, setSelectedId] = useState("WR004");
   const [showLeaveForm, setShowLeaveForm] = useState(false);
 
-  // Leave form state
   const [leaveType, setLeaveType] = useState("Annual");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [formSuccess, setFormSuccess] = useState(false);
 
-  const currentUser = employees.find((e) => e.id === selectedId);
   const userBranch = currentUser ? branches.find((b) => b.id === currentUser.branch_id) : null;
-  const userLeaves = leaveRequests.filter((l) => l.employee_id === selectedId);
+  const userLeaves = currentUser ? leaveRequests.filter((l) => l.employee_id === currentUser.id) : [];
 
   const calcDays = (): number => {
     if (!startDate || !endDate) return 0;
@@ -41,6 +38,7 @@ export default function SelfService() {
 
   const handleLeaveSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentUser) return;
     setFormError(null);
     if (!startDate || !endDate || !reason) {
       setFormError("Please fill in all required fields.");
@@ -52,7 +50,7 @@ export default function SelfService() {
     }
     setSubmitting(true);
     const result = await addLeaveRequest({
-      employee_id: selectedId,
+      employee_id: currentUser.id,
       type: leaveType,
       start_date: startDate,
       end_date: endDate,
@@ -67,12 +65,11 @@ export default function SelfService() {
       setFormError(result.error);
       return;
     }
-    setFormSuccess(true);
     setShowLeaveForm(false);
-    setStartDate(""); setEndDate(""); setReason(""); setLeaveType("Annual"); setFormSuccess(false);
+    setStartDate(""); setEndDate(""); setReason(""); setLeaveType("Annual");
   };
 
-  if (empLoading) {
+  if (authLoading) {
     return (
       <div className="flex items-center justify-center h-64">
         <p className="text-muted-foreground text-sm">Loading profile…</p>
@@ -83,12 +80,9 @@ export default function SelfService() {
   if (!currentUser) {
     return (
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Employee Self-Service</h1>
-        </div>
+        <h1 className="text-2xl font-bold text-foreground">Employee Self-Service</h1>
         <div className="rounded-xl border border-border bg-card p-10 text-center shadow-sm">
-          <p className="text-sm font-medium text-card-foreground">Employee not found</p>
-          <p className="text-xs text-muted-foreground mt-1">Please select an employee from the dropdown below.</p>
+          <p className="text-sm text-muted-foreground">No employee profile linked to your account.</p>
         </div>
       </div>
     );
@@ -104,29 +98,18 @@ export default function SelfService() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Employee Self-Service</h1>
-          <p className="text-sm text-muted-foreground">Welcome, {currentUser.name}</p>
-        </div>
-        {/* Employee selector */}
-        <Select value={selectedId} onValueChange={setSelectedId}>
-          <SelectTrigger className="w-[220px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {employees.map((e) => (
-              <SelectItem key={e.id} value={e.id}>{e.name} ({e.id})</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div>
+        <h1 className="text-2xl font-bold text-foreground">Employee Self-Service</h1>
+        <p className="text-sm text-muted-foreground">Welcome, {currentUser.name}</p>
       </div>
 
       {/* Profile Card */}
       <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
         <div className="flex items-start gap-5">
           <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 shrink-0">
-            <UserCircle className="h-8 w-8 text-primary" />
+            <span className="text-2xl font-bold text-primary">
+              {currentUser.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+            </span>
           </div>
           <div className="flex-1 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {[
@@ -211,7 +194,7 @@ export default function SelfService() {
           </div>
           {userLeaves.length > 0 ? (
             <div className="space-y-2">
-              {userLeaves.map((req) => (
+              {userLeaves.slice(0, 5).map((req) => (
                 <div key={req.id} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
                   <div>
                     <p className="text-sm font-medium text-card-foreground">{req.type} Leave</p>
@@ -277,11 +260,11 @@ export default function SelfService() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">Start Date <span className="text-destructive">*</span></label>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">Start Date *</label>
                 <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
               </div>
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">End Date <span className="text-destructive">*</span></label>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">End Date *</label>
                 <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
               </div>
             </div>
@@ -291,7 +274,7 @@ export default function SelfService() {
               </div>
             )}
             <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">Reason <span className="text-destructive">*</span></label>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Reason *</label>
               <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Brief reason…" />
             </div>
             <div className="flex justify-end gap-2 border-t border-border pt-3">

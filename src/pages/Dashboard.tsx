@@ -1,9 +1,11 @@
-import { Users, Wallet, CalendarDays, Building2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Users, Wallet, CalendarDays, Building2, AlertTriangle } from "lucide-react";
 import StatCard from "@/components/StatCard";
 import { calculatePayroll } from "@/data/mockData";
 import { useBranches, useEmployees, useLeaveRequests } from "@/hooks/useSupabaseData";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
 
 function SkeletonCard() {
   return (
@@ -15,13 +17,30 @@ function SkeletonCard() {
   );
 }
 
+function daysUntil(dateStr: string | null): number | null {
+  if (!dateStr) return null;
+  return Math.ceil((new Date(dateStr).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+}
+
 export default function Dashboard() {
   const { branches, loading: branchesLoading, error: branchesError } = useBranches();
   const { employees, loading: employeesLoading, error: employeesError } = useEmployees();
   const { leaveRequests, loading: leavesLoading, error: leavesError } = useLeaveRequests();
+  const [expiringContracts, setExpiringContracts] = useState<{ employee_id: string; end_date: string }[]>([]);
 
   const loading = branchesLoading || employeesLoading || leavesLoading;
   const error = branchesError || employeesError || leavesError;
+
+  useEffect(() => {
+    supabase.from("contracts").select("employee_id, end_date").eq("status", "active").not("end_date", "is", null)
+      .then(({ data }) => {
+        const expiring = (data ?? []).filter((c) => {
+          const d = daysUntil(c.end_date);
+          return d !== null && d <= 60 && d > 0;
+        });
+        setExpiringContracts(expiring);
+      });
+  }, []);
 
   const totalPayroll = employees.reduce((sum, emp) => sum + calculatePayroll(emp).gross, 0);
   const pendingLeaves = leaveRequests.filter((l) => l.status === "Pending").length;
@@ -43,6 +62,17 @@ export default function Dashboard() {
         <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
         <p className="text-sm text-muted-foreground">Whiterose Venyou Enterprises — Multi-Branch Overview</p>
       </div>
+
+      {/* Contract expiry alert */}
+      {expiringContracts.length > 0 && (
+        <div className="flex items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4">
+          <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0" />
+          <p className="text-sm text-amber-800 font-medium">
+            {expiringContracts.length} employee contract{expiringContracts.length > 1 ? "s" : ""} expiring within 60 days — review in{" "}
+            <a href="/contracts" className="underline">Contracts</a>
+          </p>
+        </div>
+      )}
 
       {/* Top KPI Stats */}
       {loading ? (
