@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -13,15 +13,21 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  if (!loading && session) {
-    return <Navigate to={role === "employee" ? "/self-service" : "/"} replace />;
-  }
-
   useEffect(() => {
     if (!loading && session) {
       navigate(role === "employee" ? "/self-service" : "/", { replace: true });
     }
   }, [loading, navigate, role, session]);
+
+  if (loading) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#0D1B4B" }}>
+        <div style={{ color: "white", fontSize: "14px" }}>Loading...</div>
+      </div>
+    );
+  }
+
+  if (session) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

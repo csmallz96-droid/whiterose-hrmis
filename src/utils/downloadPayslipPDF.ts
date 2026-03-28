@@ -42,22 +42,61 @@ export async function downloadPayslipPDF(employee: Employee, branchName: string,
 export function printPayslip(employee: Employee, branchName: string, period: string) {
   const printRoot = document.createElement("div");
   printRoot.id = "payslip-print-root";
-  printRoot.style.cssText = "display:none;position:fixed;top:0;left:0;width:100%;background:#fff;z-index:99999;padding:20px;";
+  printRoot.style.cssText = "display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:#fff;z-index:99999;padding:20px;overflow:auto;";
   document.body.appendChild(printRoot);
 
-  const root = createRoot(printRoot);
+  // Print-mode CSS: hide close button when printing
+  const style = document.createElement("style");
+  style.textContent = "@media print { .payslip-close-btn { display: none !important; } }";
+  document.head.appendChild(style);
+
+  const cleanup = () => {
+    root.unmount();
+    if (document.body.contains(printRoot)) document.body.removeChild(printRoot);
+    if (document.head.contains(style)) document.head.removeChild(style);
+    document.removeEventListener("keydown", handleEsc);
+  };
+
+  // Escape key closes the overlay
+  const handleEsc = (e: KeyboardEvent) => {
+    if (e.key === "Escape") cleanup();
+  };
+  document.addEventListener("keydown", handleEsc);
+
+  // Close button — fixed top-right, red, circular
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "payslip-close-btn";
+  closeBtn.innerHTML = "&#215;";
+  closeBtn.style.cssText = [
+    "position:fixed",
+    "top:16px",
+    "right:20px",
+    "z-index:10000",
+    "background:#CC0000",
+    "color:white",
+    "border:none",
+    "border-radius:50%",
+    "width:36px",
+    "height:36px",
+    "font-size:20px",
+    "cursor:pointer",
+    "display:flex",
+    "align-items:center",
+    "justify-content:center",
+    "box-shadow:0 2px 8px rgba(0,0,0,0.3)",
+  ].join(";");
+  closeBtn.onclick = cleanup;
+  printRoot.appendChild(closeBtn);
+
+  const contentDiv = document.createElement("div");
+  printRoot.appendChild(contentDiv);
+
+  const root = createRoot(contentDiv);
   root.render(createElement(PayslipPrintTemplate, { employee, branchName, period }));
 
   setTimeout(() => {
     printRoot.style.display = "block";
     window.print();
-    window.addEventListener(
-      "afterprint",
-      () => {
-        root.unmount();
-        if (document.body.contains(printRoot)) document.body.removeChild(printRoot);
-      },
-      { once: true }
-    );
+    window.addEventListener("afterprint", cleanup, { once: true });
   }, 300);
 }

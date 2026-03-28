@@ -8,6 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Wallet, CalendarDays, FileText, Receipt, UserCircle, BookOpen, Printer, Download, Plus } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/components/ui/use-toast";
 import { formatDate, formatCurrency } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import { printPayslip, downloadPayslipPDF } from "@/utils/downloadPayslipPDF";
@@ -323,44 +325,180 @@ function ExpensesTab() {
 // ─── My Performance Tab ────────────────────────────────────────────────────────
 function PerformanceTab() {
   const { employee } = useAuth();
+  const { toast } = useToast();
   const [appraisals, setAppraisals] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selfScores, setSelfScores] = useState<Record<string, string>>({});
+  const [selfComments, setSelfComments] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState<Record<string, boolean>>({});
 
-  useEffect(() => {
+  const fetchAppraisals = () => {
     if (!employee) return;
     supabase.from("appraisals").select("*").eq("employee_id", employee.id).order("created_at", { ascending: false })
       .then(({ data }) => { setAppraisals(data ?? []); setLoading(false); });
-  }, [employee]);
+  };
 
-  const ratingColor = (r: string) => ({ Exceeds: "bg-green-100 text-green-800", Meets: "bg-blue-100 text-blue-800", Below: "bg-red-100 text-red-800" }[r] ?? "bg-gray-100 text-gray-700");
+  useEffect(() => { fetchAppraisals(); }, [employee]); // eslint-disable-line
+
+  const handleSubmitSelf = async (appraisalId: string) => {
+    const score = parseFloat(selfScores[appraisalId] ?? "");
+    if (isNaN(score) || score < 1 || score > 5) {
+      toast({ title: "Invalid score", description: "Score must be between 1.0 and 5.0.", variant: "destructive" });
+      return;
+    }
+    setSubmitting((prev) => ({ ...prev, [appraisalId]: true }));
+    const { error } = await supabase.from("appraisals").update({
+      self_score: score,
+      status: "self-assessed",
+      ...(selfComments[appraisalId] ? { comments: selfComments[appraisalId] } : {}),
+    }).eq("id", appraisalId);
+    setSubmitting((prev) => ({ ...prev, [appraisalId]: false }));
+    if (error) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Self-assessment submitted", description: "Your manager will complete their review." });
+    fetchAppraisals();
+  };
+
+  const getRatingLabel = (score: number) => {
+    if (score >= 4.5) return { label: "Exceeds Expectations", cls: "bg-green-100 text-green-800" };
+    if (score >= 3.0) return { label: "Meets Expectations", cls: "bg-[#2B3990]/10 text-[#2B3990]" };
+    return { label: "Below Expectations", cls: "bg-amber-100 text-amber-800" };
+  };
 
   return (
     <div className="space-y-4">
       <h3 className="text-sm font-semibold text-card-foreground">My Performance Reviews</h3>
-      {loading ? <div className="animate-pulse space-y-2">{[...Array(2)].map((_, i) => <div key={i} className="h-20 rounded-lg bg-muted" />)}</div>
-        : appraisals.length === 0 ? (
-          <div className="rounded-xl border border-border bg-card p-10 text-center shadow-sm">
-            <FileText className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-            <p className="text-sm text-muted-foreground">No performance reviews on record yet.</p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {appraisals.map((a) => (
-              <div key={a.id as string} className="rounded-xl border border-border bg-card p-4 shadow-sm">
+      {loading ? (
+        <div className="animate-pulse space-y-2">{[...Array(2)].map((_, i) => <div key={i} className="h-20 rounded-lg bg-muted" />)}</div>
+      ) : appraisals.length === 0 ? (
+        <div className="rounded-xl border border-border bg-card p-8 text-center shadow-sm">
+          <FileText className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+          <p className="text-sm font-medium text-card-foreground mb-1">No performance reviews yet</p>
+          <p className="text-xs text-muted-foreground">Contact HR if you have questions.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {appraisals.map((a) => {
+            const status = a.status as string;
+            const id = a.id as string;
+
+            // Case A — Pending: show self-assessment form
+            if (status === "pending") {
+              return (
+                <div key={id} className="rounded-xl border border-[#2B3990]/30 bg-card p-5 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold text-card-foreground">{a.period as string} — Self Assessment Due</p>
+                    <Badge className="bg-amber-100 text-amber-800 border-0">Pending</Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Please complete your self-assessment below. Rate yourself honestly from 1.0 to 5.0.</p>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground block mb-1">Your Self-Assessment Score (1.0 – 5.0) *</label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={5}
+                        step={0.1}
+                        value={selfScores[id] ?? ""}
+                        onChange={(e) => setSelfScores((prev) => ({ ...prev, [id]: e.target.value }))}
+                        placeholder="e.g. 3.5"
+                        className="max-w-[160px]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground block mb-1">Comments / Achievements (optional)</label>
+                      <Textarea
+                        value={selfComments[id] ?? ""}
+                        onChange={(e) => setSelfComments((prev) => ({ ...prev, [id]: e.target.value }))}
+                        placeholder="Describe your key achievements…"
+                        rows={3}
+                      />
+                    </div>
+                    <Button
+                      size="sm"
+                      className="bg-[#2B3990] hover:bg-[#1e2a6e] text-white"
+                      onClick={() => handleSubmitSelf(id)}
+                      disabled={submitting[id]}
+                    >
+                      {submitting[id] ? "Submitting…" : "Submit Self-Assessment"}
+                    </Button>
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">⚠ Once submitted, your score cannot be changed.</p>
+                  </div>
+                </div>
+              );
+            }
+
+            // Case B — Self-assessed: awaiting manager
+            if (status === "self-assessed") {
+              return (
+                <div key={id} className="rounded-xl border border-border bg-card p-4 shadow-sm">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-sm font-semibold text-card-foreground">{a.period as string}</p>
+                    <Badge className="bg-blue-100 text-blue-800 border-0">Pending Manager Review</Badge>
+                  </div>
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex justify-between"><span className="text-muted-foreground">Your Self Score:</span><span className="font-semibold">{(a.self_score as number).toFixed(1)} / 5.0</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Manager Score:</span><span className="text-muted-foreground italic">Awaiting review…</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Final Score:</span><span className="text-muted-foreground">—</span></div>
+                  </div>
+                  <p className="mt-3 text-xs text-muted-foreground bg-muted/50 rounded p-2">Your assessment has been submitted. Your manager will complete their review shortly.</p>
+                </div>
+              );
+            }
+
+            // Case C — Manager reviewed or completed
+            if (status === "manager-reviewed" || status === "completed") {
+              const finalScore = a.final_score as number | null;
+              const rating = finalScore !== null ? getRatingLabel(finalScore) : null;
+              return (
+                <div key={id} className="rounded-xl border border-border bg-card p-4 shadow-sm">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-sm font-semibold text-card-foreground">{a.period as string}</p>
+                    <Badge className="bg-green-100 text-green-800 border-0">Completed</Badge>
+                  </div>
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex justify-between"><span className="text-muted-foreground">Your Self Score:</span><span className="font-semibold">{a.self_score != null ? `${(a.self_score as number).toFixed(1)} / 5.0` : "—"}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Manager Score:</span><span className="font-semibold">{a.manager_score != null ? `${(a.manager_score as number).toFixed(1)} / 5.0` : "—"}</span></div>
+                    <div className="flex justify-between border-t border-border pt-1.5 mt-1">
+                      <span className="font-medium text-card-foreground">Final Score:</span>
+                      <span className="font-bold text-primary">{finalScore != null ? `${finalScore.toFixed(2)} / 5.0` : "—"}</span>
+                    </div>
+                    {rating && (
+                      <div className="flex justify-between items-center pt-1">
+                        <span className="text-muted-foreground">Rating:</span>
+                        <Badge className={`${rating.cls} border-0`}>{rating.label}</Badge>
+                      </div>
+                    )}
+                  </div>
+                  {a.comments && (
+                    <div className="mt-3">
+                      <p className="text-xs font-medium text-muted-foreground mb-1">Manager Comments:</p>
+                      <p className="text-xs text-card-foreground bg-muted/50 rounded p-2 italic">"{a.comments as string}"</p>
+                    </div>
+                  )}
+                </div>
+              );
+            }
+
+            // Fallback for any other status
+            return (
+              <div key={id} className="rounded-xl border border-border bg-card p-4 shadow-sm">
                 <div className="flex items-center justify-between mb-2">
                   <p className="text-sm font-medium text-card-foreground">{a.period as string}</p>
-                  {a.rating && <Badge className={`${ratingColor(a.rating as string)} border-0`}>{a.rating as string}</Badge>}
+                  <Badge className="bg-gray-100 text-gray-700 border-0 capitalize">{status}</Badge>
                 </div>
                 <div className="grid grid-cols-3 gap-3 text-xs">
                   <div><p className="text-muted-foreground">Self Score</p><p className="font-semibold">{a.self_score != null ? `${(a.self_score as number).toFixed(1)} / 5` : "—"}</p></div>
                   <div><p className="text-muted-foreground">Manager Score</p><p className="font-semibold">{a.manager_score != null ? `${(a.manager_score as number).toFixed(1)} / 5` : "—"}</p></div>
                   <div><p className="text-muted-foreground">Final Score</p><p className="font-bold text-primary">{a.final_score != null ? `${(a.final_score as number).toFixed(2)} / 5` : "—"}</p></div>
                 </div>
-                {a.comments && <p className="mt-2 text-xs text-muted-foreground bg-muted/50 rounded p-2 italic">"{a.comments as string}"</p>}
               </div>
-            ))}
-          </div>
-        )}
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

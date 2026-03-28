@@ -148,21 +148,27 @@ export default function Reports() {
         <p className="text-sm text-muted-foreground">Generate branded HR reports and employee-specific exports</p>
       </div>
 
-      <div className="flex items-center gap-3 flex-wrap">
-        <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-          <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].map((month, index) => (
-              <SelectItem key={month} value={String(index + 1)}>{month} {selectedYear}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={selectedYear} onValueChange={setSelectedYear}>
-          <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {["2024", "2025", "2026"].map((year) => <SelectItem key={year} value={year}>{year}</SelectItem>)}
-          </SelectContent>
-        </Select>
+      <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex flex-col gap-1">
+          <span className="text-xs font-medium text-muted-foreground">Month</span>
+          <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+            <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map((month, index) => (
+                <SelectItem key={month} value={String(index + 1)}>{month}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-xs font-medium text-muted-foreground">Year</span>
+          <Select value={selectedYear} onValueChange={setSelectedYear}>
+            <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {["2024", "2025", "2026", "2027"].map((year) => <SelectItem key={year} value={year}>{year}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">

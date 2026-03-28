@@ -9,6 +9,8 @@ import { Download, Target } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
 import { formatDate } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { downloadPerformanceHistoryReport } from "@/utils/employeeReports";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 
@@ -49,12 +51,15 @@ function ScoreBar({ score, max = 5 }: { score: number | null; max?: number }) {
 
 export default function Performance() {
   const { employees } = useEmployees();
-  const { role } = useAuth();
+  const { role, employee: currentEmployee } = useAuth();
   const [appraisals, setAppraisals] = useState<Appraisal[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("all");
   const [selected, setSelected] = useState<Appraisal | null>(null);
   const [starting, setStarting] = useState(false);
+  const [managerScore, setManagerScore] = useState("");
+  const [managerComments, setManagerComments] = useState("");
+  const [savingScore, setSavingScore] = useState(false);
 
   const fetchAppraisals = () => {
     supabase.from("appraisals").select("*").order("created_at", { ascending: false })
@@ -91,6 +96,31 @@ export default function Performance() {
     await supabase.from("appraisals").insert(records);
     setStarting(false);
     fetchAppraisals();
+  };
+
+  const handleSaveManagerScore = async () => {
+    if (!selected) return;
+    const score = parseFloat(managerScore);
+    if (isNaN(score) || score < 1 || score > 5) return;
+    setSavingScore(true);
+    const selfScore = selected.self_score ?? score;
+    const finalScore = parseFloat(((selfScore + score) / 2).toFixed(2));
+    const rating = finalScore >= 4.5 ? "Exceeds" : finalScore >= 3.0 ? "Meets" : "Below";
+    const { error } = await supabase.from("appraisals").update({
+      manager_score: score,
+      final_score: finalScore,
+      rating,
+      status: "completed",
+      comments: managerComments || selected.comments || null,
+      appraiser_id: currentEmployee?.id ?? null,
+    }).eq("id", selected.id);
+    setSavingScore(false);
+    if (!error) {
+      fetchAppraisals();
+      setSelected(null);
+      setManagerScore("");
+      setManagerComments("");
+    }
   };
 
   return (
@@ -190,7 +220,7 @@ export default function Performance() {
         </div>
       )}
 
-      <Dialog open={!!selected} onOpenChange={(open) => { if (!open) setSelected(null); }}>
+      <Dialog open={!!selected} onOpenChange={(open) => { if (!open) { setSelected(null); setManagerScore(""); setManagerComments(""); } }}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>Appraisal Details</DialogTitle></DialogHeader>
           {selected && (() => {
@@ -246,6 +276,45 @@ export default function Performance() {
                     <p className="text-sm text-card-foreground bg-muted/50 rounded p-3">{selected.comments}</p>
                   </div>
                 )}
+
+                {/* Manager score entry — shown only for self-assessed appraisals */}
+                {selected.status === "self-assessed" && (role === "hr" || role === "admin" || role === "manager") && (
+                  <div className="rounded-lg border border-[#2B3990]/30 bg-muted/30 p-4 space-y-3">
+                    <p className="text-sm font-semibold text-card-foreground">Complete Manager Review</p>
+                    <p className="text-xs text-muted-foreground">Employee self score: <strong>{selected.self_score?.toFixed(1) ?? "—"} / 5</strong>. Enter your score to finalise this appraisal.</p>
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground block mb-1">Manager Score (1.0 – 5.0) *</label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={5}
+                        step={0.1}
+                        value={managerScore}
+                        onChange={(e) => setManagerScore(e.target.value)}
+                        placeholder="e.g. 3.8"
+                        className="max-w-[160px]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground block mb-1">Comments (optional)</label>
+                      <Textarea
+                        value={managerComments}
+                        onChange={(e) => setManagerComments(e.target.value)}
+                        placeholder="Add feedback for the employee…"
+                        rows={3}
+                      />
+                    </div>
+                    <Button
+                      size="sm"
+                      className="bg-[#2B3990] hover:bg-[#1e2a6e] text-white"
+                      onClick={handleSaveManagerScore}
+                      disabled={savingScore || !managerScore}
+                    >
+                      {savingScore ? "Saving…" : "Save & Complete Appraisal"}
+                    </Button>
+                  </div>
+                )}
+
                 {/* Score Trend Chart */}
                 {employeeHistory.filter((h) => h.final_score !== null).length > 1 && (() => {
                   const chartData = [...employeeHistory]
