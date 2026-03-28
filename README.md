@@ -1,3 +1,3 @@
-# Welcome to your Lovable project
+# Welcome to Whiterose HMIS
 
 TODO: Document your project here
