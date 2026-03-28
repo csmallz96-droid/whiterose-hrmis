@@ -161,7 +161,7 @@ function EmployeeLeaveHistoryModal({ employeeId, onClose, employees, branches, l
     downloadBrandedCSV(
       `Leave_History_${emp?.name ?? employeeId}`,
       ["Employee ID", "Name", "Branch", "Leave Type", "Start Date", "End Date", "Days", "Reason", "Status", "Applied On"],
-      history.map((r) => [
+      [history.map((r) => [
         r.employee_id,
         emp?.name ?? "",
         branch?.name ?? "",
@@ -172,7 +172,7 @@ function EmployeeLeaveHistoryModal({ employeeId, onClose, employees, branches, l
         r.reason,
         r.status,
         r.applied_on ?? "",
-      ])
+      ])]
     );
   };
 
@@ -294,7 +294,7 @@ function LeaveHistoryTab({ leaveRequests, employees, branches }: LeaveHistoryTab
     downloadBrandedCSV(
       "Leave_History_All",
       ["Employee ID", "Employee Name", "Branch", "Leave Type", "Start Date", "End Date", "Days", "Reason", "Status", "Applied On"],
-      filtered.map((req) => {
+      [filtered.map((req) => {
         const emp = employees.find((e) => e.id === req.employee_id);
         const branch = branches.find((b) => b.id === getBranchId(req.employee_id));
         return [
@@ -309,7 +309,7 @@ function LeaveHistoryTab({ leaveRequests, employees, branches }: LeaveHistoryTab
           req.status,
           req.applied_on ?? "",
         ];
-      })
+      })]
     );
   };
 
