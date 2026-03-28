@@ -5,10 +5,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Target } from "lucide-react";
+import { Download, Target } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
 import { formatDate } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
+import { downloadPerformanceHistoryReport } from "@/utils/employeeReports";
 
 type Appraisal = Tables<"appraisals">;
 
@@ -194,8 +195,16 @@ export default function Performance() {
           {selected && (() => {
             const emp = employees.find((e) => e.id === selected.employee_id);
             const appraiser = employees.find((e) => e.id === selected.appraiser_id);
+            const employeeHistory = appraisals.filter((a) => a.employee_id === selected.employee_id);
             return (
               <div className="space-y-4">
+                {emp && (
+                  <div className="flex justify-end">
+                    <Button size="sm" variant="outline" onClick={() => downloadPerformanceHistoryReport(emp, employeeHistory)}>
+                      <Download className="mr-2 h-4 w-4" /> Download Performance Report
+                    </Button>
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   {[
                     ["Employee", emp?.name ?? selected.employee_id],
@@ -236,6 +245,22 @@ export default function Performance() {
                     <p className="text-sm text-card-foreground bg-muted/50 rounded p-3">{selected.comments}</p>
                   </div>
                 )}
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Appraisal History</p>
+                  <div className="space-y-2">
+                    {employeeHistory.map((historyItem) => (
+                      <div key={historyItem.id} className="rounded-lg bg-muted/50 p-3 text-sm">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium text-card-foreground">{historyItem.period}</span>
+                          <RatingBadge rating={historyItem.rating} />
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Final Score: {historyItem.final_score?.toFixed(2) ?? "-"} / 5 | Created {formatDate(historyItem.created_at.split("T")[0])}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             );
           })()}

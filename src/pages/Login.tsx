@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/context/AuthContext";
@@ -6,48 +6,53 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export default function Login() {
-  const { session, loading } = useAuth();
+  const { session, loading, role } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Already logged in → redirect to dashboard
   if (!loading && session) {
-    return <Navigate to="/" replace />;
+    return <Navigate to={role === "employee" ? "/self-service" : "/"} replace />;
   }
+
+  useEffect(() => {
+    if (!loading && session) {
+      navigate(role === "employee" ? "/self-service" : "/", { replace: true });
+    }
+  }, [loading, navigate, role, session]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
+
     const { error: err } = await supabase.auth.signInWithPassword({ email, password });
+
     setSubmitting(false);
     if (err) {
-      setError(err.message === "Invalid login credentials"
-        ? "Incorrect email or password. Please try again."
-        : err.message);
+      setError(
+        err.message === "Invalid login credentials"
+          ? "Incorrect email or password. Please try again."
+          : err.message,
+      );
       return;
     }
-    navigate("/");
+
   };
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-sm space-y-6">
-        {/* Brand */}
         <div className="flex flex-col items-center gap-3">
           <img src="/logo.jpeg" alt="Whiterose" className="h-20 w-auto rounded-xl shadow-md" />
           <div className="text-center">
             <h1 className="text-2xl font-bold text-[#2B3990]">Whiterose HRMIS</h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Whiterose Venyou Enterprises Ltd
-            </p>
+            <p className="text-sm text-muted-foreground mt-1">Whiterose Venyou Enterprises Ltd</p>
           </div>
         </div>
 
-        {/* Form */}
         <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
           <h2 className="text-base font-semibold text-card-foreground mb-4">Sign in to your account</h2>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -72,7 +77,7 @@ export default function Login() {
               <Input
                 type="password"
                 autoComplete="current-password"
-                placeholder="••••••••"
+                placeholder="........"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
@@ -83,14 +88,12 @@ export default function Login() {
               className="w-full bg-[#2B3990] hover:bg-[#1e2a6e] text-white"
               disabled={submitting}
             >
-              {submitting ? "Signing in…" : "Sign In"}
+              {submitting ? "Signing in..." : "Sign In"}
             </Button>
           </form>
         </div>
 
-        <p className="text-center text-xs text-muted-foreground">
-          Whiterose HRMIS · Mombasa, Kenya
-        </p>
+        <p className="text-center text-xs text-muted-foreground">Whiterose HRMIS | Mombasa, Kenya</p>
       </div>
     </div>
   );

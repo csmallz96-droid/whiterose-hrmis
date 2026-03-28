@@ -1,199 +1,303 @@
-import { useState, useRef } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useBranches, useEmployees, type Employee } from "@/hooks/useSupabaseData";
 import { calculatePayroll } from "@/data/mockData";
 import { supabase } from "@/integrations/supabase/client";
+import type { Tables, TablesInsert } from "@/integrations/supabase/types";
 import { useAuth } from "@/context/AuthContext";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { Wallet, FileText, CheckCircle, Download, Printer } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Wallet, FileText, CheckCircle, Download, Printer, History, ChevronRight } from "lucide-react";
 import StatCard from "@/components/StatCard";
 import { formatDate, formatCurrency } from "@/lib/utils";
+import { printPayslip, downloadPayslipPDF } from "@/utils/downloadPayslipPDF";
+import { downloadBrandedCSV } from "@/utils/brandedExport";
+import { downloadPayrollReport, type PayrollReportEmployee } from "@/utils/downloadPayrollReport";
 
-const CURRENT_MONTH = "March 2026";
+const PERIOD_MONTH = 3;
+const PERIOD_YEAR = 2026;
+const CURRENT_PERIOD = new Date(PERIOD_YEAR, PERIOD_MONTH - 1, 1).toLocaleDateString("en-KE", { month: "long", year: "numeric" });
 
-// ─── Payslip Component (also used for printing) ───────────────────────────────
+type PayrollRun = Tables<"payroll_runs">;
+type Payslip = Tables<"payslips">;
 
-interface PayslipProps {
-  emp: Employee;
-  branchName: string;
-  period: string;
+type Totals = { gross: number; paye: number; nssf: number; sha: number; ahl: number; nita: number; net: number };
+
+function buildPayrollRows(employees: Employee[], branches: ReturnType<typeof useBranches>["branches"]): PayrollReportEmployee[] {
+  return employees.map((emp) => {
+    const payroll = calculatePayroll(emp);
+    const branch = branches.find((item) => item.id === emp.branch_id)?.name ?? "-";
+    return {
+      id: emp.id,
+      name: emp.name,
+      branch,
+      gross: payroll.gross,
+      paye: payroll.paye,
+      nssf: payroll.nssf.employee,
+      sha: payroll.sha,
+      ahl: payroll.ahl.employee,
+      nita: payroll.nita.employee,
+      net: payroll.netPay,
+    };
+  });
 }
 
-function Payslip({ emp, branchName, period }: PayslipProps) {
-  const p = calculatePayroll(emp);
+function buildTotals(employees: Employee[]): Totals {
+  return employees.reduce<Totals>((acc, emp) => {
+    const payroll = calculatePayroll(emp);
+    return {
+      gross: acc.gross + payroll.gross,
+      paye: acc.paye + payroll.paye,
+      nssf: acc.nssf + payroll.nssf.employee,
+      sha: acc.sha + payroll.sha,
+      ahl: acc.ahl + payroll.ahl.employee,
+      nita: acc.nita + payroll.nita.employee,
+      net: acc.net + payroll.netPay,
+    };
+  }, { gross: 0, paye: 0, nssf: 0, sha: 0, ahl: 0, nita: 0, net: 0 });
+}
 
-  return (
-    <div id="payslip-print" className="bg-white text-gray-900 font-sans" style={{ minWidth: 480 }}>
-      {/* Header */}
-      <div className="flex items-center justify-between border-b-2 border-[#2B3990] pb-4 mb-4">
-        <div className="flex items-center gap-3">
-          <img src="/logo.jpeg" alt="Whiterose" className="h-12 w-auto rounded" />
-          <div>
-            <p className="font-bold text-[#2B3990] text-base leading-tight">Whiterose Venyou Enterprises Ltd</p>
-            <p className="text-xs text-gray-500">Mombasa, Kenya · NSSF No: 2446614X</p>
-          </div>
-        </div>
-        <div className="text-right">
-          <p className="font-bold text-sm text-[#2B3990]">PAYSLIP</p>
-          <p className="text-xs text-gray-500">Pay Period: {period}</p>
-        </div>
-      </div>
-
-      {/* Employee Info */}
-      <div className="grid grid-cols-2 gap-x-6 gap-y-1 mb-4 text-sm">
-        {[
-          ["Employee ID", emp.id],
-          ["Name", emp.name],
-          ["Job Title", emp.job_title],
-          ["Branch", branchName],
-          ["NSSF No.", emp.nssf_no],
-          ["KRA PIN", emp.kra_pin],
-        ].map(([label, value]) => (
-          <div key={label} className="flex gap-2">
-            <span className="text-gray-500 min-w-[90px]">{label}:</span>
-            <span className="font-medium">{value}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* Earnings + Deductions */}
-      <div className="grid grid-cols-2 gap-6 mb-4">
-        <div>
-          <p className="text-xs font-bold uppercase text-[#2B3990] mb-2 border-b border-gray-200 pb-1">Earnings</p>
-          <div className="space-y-1 text-sm">
-            {[
-              ["Basic Salary", emp.basic_salary],
-              ["House Allowance", emp.house_allowance],
-              ["Transport Allowance", emp.transport_allowance],
-            ].map(([label, val]) => (
-              <div key={label as string} className="flex justify-between">
-                <span className="text-gray-600">{label}</span>
-                <span>{formatCurrency(val as number)}</span>
-              </div>
-            ))}
-            <div className="flex justify-between font-bold border-t border-gray-200 pt-1 mt-1">
-              <span>Gross Pay</span>
-              <span>{formatCurrency(p.gross)}</span>
-            </div>
-          </div>
-        </div>
-        <div>
-          <p className="text-xs font-bold uppercase text-[#2B3990] mb-2 border-b border-gray-200 pb-1">Deductions</p>
-          <div className="space-y-1 text-sm">
-            {[
-              ["PAYE", p.paye],
-              ["NSSF (Employee)", p.nssf.employee],
-              ["SHA (2.75%)", p.sha],
-              ["AHL (1.5%)", p.ahl.employee],
-              ["NITA", p.nita.employee],
-            ].map(([label, val]) => (
-              <div key={label as string} className="flex justify-between">
-                <span className="text-gray-600">{label}</span>
-                <span className="text-red-600">{formatCurrency(val as number)}</span>
-              </div>
-            ))}
-            <div className="flex justify-between text-gray-500 text-xs mt-1">
-              <span>Total Deductions</span>
-              <span>{formatCurrency(p.totalDeductions)}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Net Pay */}
-      <div className="flex justify-between items-center bg-[#2B3990] text-white rounded-lg px-4 py-3">
-        <span className="font-bold text-sm">NET PAY</span>
-        <span className="font-bold text-lg">{formatCurrency(p.netPay, 2)}</span>
-      </div>
-
-      <p className="text-center text-xs text-gray-400 mt-3">
-        This payslip is computer-generated and does not require a signature.
-      </p>
-    </div>
+function downloadBankCSV(employees: Employee[], periodLabel: string) {
+  downloadBrandedCSV(
+    "PaymentFile",
+    ["Employee ID", "Employee Name", "Branch", "Bank Name", "Account Number", "M-Pesa Number", "Net Pay", "Payment Method"],
+    [employees.map((emp) => {
+      const payroll = calculatePayroll(emp);
+      return [
+        emp.id,
+        emp.name,
+        emp.branch_id,
+        emp.bank_name ?? "",
+        emp.bank_account ?? "",
+        emp.mpesa_no ?? "",
+        payroll.netPay.toFixed(2),
+        emp.bank_account ? "Bank Transfer" : "M-Pesa",
+      ];
+    })],
+    periodLabel,
   );
 }
 
-// ─── Main Payroll Page ────────────────────────────────────────────────────────
+function RunConfirmModal({
+  open,
+  onClose,
+  totals,
+  employees,
+  periodLabel,
+  branches,
+}: {
+  open: boolean;
+  onClose: () => void;
+  totals: Totals;
+  employees: Employee[];
+  periodLabel: string;
+  branches: ReturnType<typeof useBranches>["branches"];
+}) {
+  const reportEmployees = useMemo(() => buildPayrollRows(employees, branches), [employees, branches]);
+
+  return (
+    <Dialog open={open} onOpenChange={(state) => { if (!state) onClose(); }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <CheckCircle className="h-5 w-5 text-green-600" />
+            Payroll Run Complete - {periodLabel}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="overflow-hidden rounded-lg border border-border">
+            <table className="w-full text-sm">
+              <tbody>
+                {[
+                  ["Total Employees Processed", employees.length],
+                  ["Total Gross Pay", formatCurrency(totals.gross)],
+                  ["Total PAYE", formatCurrency(totals.paye)],
+                  ["Total NSSF", formatCurrency(totals.nssf)],
+                  ["Total SHA", formatCurrency(totals.sha)],
+                  ["Total AHL", formatCurrency(totals.ahl)],
+                  ["Total NITA", formatCurrency(totals.nita)],
+                  ["Total Net Pay", formatCurrency(totals.net)],
+                ].map(([label, value], index) => (
+                  <tr key={label as string} className={index % 2 === 0 ? "bg-muted/30" : ""}>
+                    <td className="px-4 py-2 text-muted-foreground">{label}</td>
+                    <td className="px-4 py-2 text-right font-semibold text-card-foreground">{value}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex gap-2 pt-1 flex-wrap">
+            <Button variant="outline" size="sm" className="flex-1" onClick={() => downloadPayrollReport(periodLabel, totals, reportEmployees)}>
+              <Download className="mr-2 h-3.5 w-3.5" /> Download Payroll Report (PDF)
+            </Button>
+            <Button variant="outline" size="sm" className="flex-1" onClick={() => downloadBankCSV(employees, periodLabel)}>
+              <Download className="mr-2 h-3.5 w-3.5" /> Download for Bank (CSV)
+            </Button>
+            <Button size="sm" className="w-full" onClick={onClose}>Close</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function PayrollHistoryTab({ branches, runs }: { branches: ReturnType<typeof useBranches>["branches"]; runs: PayrollRun[] }) {
+  const navigate = useNavigate();
+  const { employees } = useEmployees();
+
+  const statusBadge = (status: string) => {
+    const map: Record<string, string> = {
+      draft: "bg-gray-100 text-gray-700",
+      approved: "bg-green-100 text-green-800",
+      disbursed: "bg-blue-100 text-blue-800",
+    };
+    return <Badge className={`${map[status] ?? "bg-gray-100 text-gray-700"} border-0 capitalize`}>{status}</Badge>;
+  };
+
+  const getPeriodLabel = (run: PayrollRun) => new Date(run.period_year, run.period_month - 1, 1).toLocaleDateString("en-KE", { month: "long", year: "numeric" });
+
+  const exportRun = async (run: PayrollRun, type: "csv" | "pdf") => {
+    const { data } = await supabase.from("payslips").select("*").eq("payroll_run_id", run.id).order("employee_id");
+    const slips = data ?? [];
+    const reportEmployees = slips.map((slip) => {
+      const employee = employees.find((item) => item.id === slip.employee_id);
+      const branch = branches.find((item) => item.id === employee?.branch_id)?.name ?? "-";
+      return {
+        id: slip.employee_id,
+        name: employee?.name ?? slip.employee_id,
+        branch,
+        gross: slip.gross_salary,
+        paye: slip.paye,
+        nssf: slip.nssf,
+        sha: slip.sha,
+        ahl: slip.ahl,
+        nita: slip.nita,
+        net: slip.net_salary,
+      };
+    });
+
+    if (type === "pdf") {
+      downloadPayrollReport(getPeriodLabel(run), {
+        gross: run.total_gross,
+        paye: run.total_paye,
+        nssf: run.total_nssf,
+        sha: run.total_sha,
+        ahl: run.total_ahl,
+        nita: run.total_nita,
+        net: run.total_net,
+      }, reportEmployees);
+      return;
+    }
+
+    downloadBrandedCSV(
+      "PayrollReport",
+      ["Employee ID", "Name", "Branch", "Gross", "PAYE", "NSSF", "SHA", "AHL", "NITA", "Net Pay"],
+      [reportEmployees.map((employee) => [employee.id, employee.name, employee.branch, employee.gross.toFixed(2), employee.paye.toFixed(2), employee.nssf.toFixed(2), employee.sha.toFixed(2), employee.ahl.toFixed(2), employee.nita.toFixed(2), employee.net.toFixed(2)])],
+      getPeriodLabel(run),
+    );
+  };
+
+  if (runs.length === 0) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-10 text-center shadow-sm">
+        <History className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+        <p className="text-sm text-muted-foreground">No payroll runs on record yet.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-border bg-muted/50">
+            <th className="px-4 py-3 text-left font-medium text-muted-foreground">Period</th>
+            <th className="px-4 py-3 text-center font-medium text-muted-foreground">Status</th>
+            <th className="px-4 py-3 text-center font-medium text-muted-foreground">Employees</th>
+            <th className="px-4 py-3 text-right font-medium text-muted-foreground">Total Gross</th>
+            <th className="px-4 py-3 text-right font-medium text-muted-foreground">Total Net</th>
+            <th className="px-4 py-3 text-left font-medium text-muted-foreground">Approved By</th>
+            <th className="px-4 py-3 text-left font-medium text-muted-foreground">Date Run</th>
+            <th className="px-4 py-3 text-right font-medium text-muted-foreground">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {runs.map((run) => (
+            <tr key={run.id} className="border-b border-border/50 hover:bg-muted/30">
+              <td className="px-4 py-3 font-medium text-card-foreground">{getPeriodLabel(run)}</td>
+              <td className="px-4 py-3 text-center">{statusBadge(run.status)}</td>
+              <td className="px-4 py-3 text-center text-card-foreground">{employees.length}</td>
+              <td className="px-4 py-3 text-right text-card-foreground">{formatCurrency(run.total_gross)}</td>
+              <td className="px-4 py-3 text-right font-semibold text-primary">{formatCurrency(run.total_net)}</td>
+              <td className="px-4 py-3 text-card-foreground">{run.approved_by ?? "-"}</td>
+              <td className="px-4 py-3 text-muted-foreground text-xs">{formatDate(run.created_at.split("T")[0])}</td>
+              <td className="px-4 py-3">
+                <div className="flex justify-end gap-1 flex-wrap">
+                  <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => navigate(`/payroll/history/${run.id}`)}>
+                    <ChevronRight className="h-3 w-3 mr-1" /> View Report
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => exportRun(run, "pdf")}>
+                    <Download className="h-3 w-3 mr-1" /> PDF
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => exportRun(run, "csv")}>
+                    <Download className="h-3 w-3 mr-1" /> CSV
+                  </Button>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 export default function Payroll() {
   const { branches } = useBranches();
   const { employees, loading, error } = useEmployees();
   const { employee: currentUser } = useAuth();
+  const [tab, setTab] = useState<"run" | "history">("run");
   const [branchFilter, setBranchFilter] = useState("all");
-  const [selectedEmp, setSelectedEmp] = useState<Employee | null>(null);
+  const [runs, setRuns] = useState<PayrollRun[]>([]);
   const [runDone, setRunDone] = useState(false);
   const [running, setRunning] = useState(false);
-  const printRef = useRef<HTMLDivElement>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
 
-  const filtered = branchFilter === "all" ? employees : employees.filter((e) => e.branch_id === branchFilter);
+  const filtered = branchFilter === "all" ? employees : employees.filter((employee) => employee.branch_id === branchFilter);
+  const totals = useMemo(() => buildTotals(filtered), [filtered]);
 
-  const totals = filtered.reduce(
-    (acc, emp) => {
-      const p = calculatePayroll(emp);
-      return {
-        gross: acc.gross + p.gross,
-        paye: acc.paye + p.paye,
-        nssf: acc.nssf + p.nssf.employee,
-        sha: acc.sha + p.sha,
-        ahl: acc.ahl + p.ahl.employee,
-        nita: acc.nita + p.nita.employee,
-        net: acc.net + p.netPay,
-      };
-    },
-    { gross: 0, paye: 0, nssf: 0, sha: 0, ahl: 0, nita: 0, net: 0 }
-  );
-
-  // CSV export
-  const downloadCSV = () => {
-    const headers = ["ID", "Name", "Branch", "Job Title", "Gross", "PAYE", "NSSF", "SHA", "AHL", "NITA", "Net Pay"];
-    const rows = filtered.map((emp) => {
-      const p = calculatePayroll(emp);
-      const branch = branches.find((b) => b.id === emp.branch_id);
-      return [
-        emp.id,
-        emp.name,
-        branch?.name ?? "",
-        emp.job_title,
-        p.gross.toFixed(2),
-        p.paye.toFixed(2),
-        p.nssf.employee.toFixed(2),
-        p.sha.toFixed(2),
-        p.ahl.employee.toFixed(2),
-        p.nita.employee.toFixed(2),
-        p.netPay.toFixed(2),
-      ].join(",");
-    });
-    const totalsRow = [
-      "TOTAL", "", "", "",
-      totals.gross.toFixed(2),
-      totals.paye.toFixed(2),
-      totals.nssf.toFixed(2),
-      totals.sha.toFixed(2),
-      totals.ahl.toFixed(2),
-      totals.nita.toFixed(2),
-      totals.net.toFixed(2),
-    ].join(",");
-    const csv = [headers.join(","), ...rows, totalsRow].join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `Whiterose_Payroll_${CURRENT_MONTH.replace(" ", "_")}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const fetchRuns = async () => {
+    const { data } = await supabase.from("payroll_runs").select("*").order("created_at", { ascending: false });
+    const payrollRuns = data ?? [];
+    setRuns(payrollRuns);
+    setRunDone(payrollRuns.some((run) => run.period_month === PERIOD_MONTH && run.period_year === PERIOD_YEAR));
   };
 
-  // Run payroll — save to payroll_runs + payslips
+  useEffect(() => {
+    fetchRuns();
+  }, []);
+
+  const exportPayrollCsv = () => {
+    const reportEmployees = buildPayrollRows(filtered, branches);
+    downloadBrandedCSV(
+      "PayrollReport",
+      ["ID", "Name", "Branch", "Gross", "PAYE", "NSSF", "SHA", "AHL", "NITA", "Net Pay"],
+      [reportEmployees.map((employee) => [employee.id, employee.name, employee.branch, employee.gross.toFixed(2), employee.paye.toFixed(2), employee.nssf.toFixed(2), employee.sha.toFixed(2), employee.ahl.toFixed(2), employee.nita.toFixed(2), employee.net.toFixed(2)])],
+      CURRENT_PERIOD,
+    );
+  };
+
   const handleRunPayroll = async () => {
-    if (runDone) return;
+    if (runDone || running) return;
     setRunning(true);
-    const period = CURRENT_MONTH;
-    // Insert payroll_run record
-    const { data: runData, error: runErr } = await supabase.from("payroll_runs").insert({
-      period,
-      run_by: currentUser?.id ?? null,
+
+    const runInsert = {
+      period_month: PERIOD_MONTH,
+      period_year: PERIOD_YEAR,
+      approved_by: currentUser?.id ?? null,
+      approved_at: new Date().toISOString(),
       status: "approved",
       total_gross: totals.gross,
       total_net: totals.net,
@@ -202,53 +306,46 @@ export default function Payroll() {
       total_sha: totals.sha,
       total_ahl: totals.ahl,
       total_nita: totals.nita,
-    }).select("id").single();
+    };
 
-    if (!runErr && runData) {
-      const payslipRecords = employees.map((emp) => {
-        const p = calculatePayroll(emp);
-        return {
-          employee_id: emp.id,
-          payroll_run_id: runData.id,
-          period,
-          gross_pay: p.gross,
-          net_pay: p.netPay,
-          paye: p.paye,
-          nssf_employee: p.nssf.employee,
-          nssf_employer: p.nssf.employer,
-          sha: p.sha,
-          ahl_employee: p.ahl.employee,
-          ahl_employer: p.ahl.employer,
-          nita: p.nita.employee,
-          basic_salary: emp.basic_salary,
-          house_allowance: emp.house_allowance,
-          transport_allowance: emp.transport_allowance,
-        };
-      });
-      await supabase.from("payslips").insert(payslipRecords);
+    const { data: runData, error: runError } = await supabase.from("payroll_runs").insert(runInsert).select("*").single();
+
+    if (runError) {
+      setRunning(false);
+      throw runError;
     }
+
+    const slips: TablesInsert<"payslips">[] = employees.map((employee) => {
+      const payroll = calculatePayroll(employee);
+      return {
+        payroll_run_id: runData.id,
+        employee_id: employee.id,
+        period_month: PERIOD_MONTH,
+        period_year: PERIOD_YEAR,
+        gross_salary: payroll.gross,
+        basic_salary: employee.basic_salary,
+        house_allowance: employee.house_allowance,
+        transport_allowance: employee.transport_allowance,
+        paye: payroll.paye,
+        nssf: payroll.nssf.employee,
+        sha: payroll.sha,
+        ahl: payroll.ahl.employee,
+        nita: payroll.nita.employee,
+        other_deductions: 0,
+        net_salary: payroll.netPay,
+      };
+    });
+
+    const { error: slipsError } = await supabase.from("payslips").insert(slips);
+    if (slipsError) {
+      setRunning(false);
+      throw slipsError;
+    }
+
     setRunning(false);
     setRunDone(true);
-  };
-
-  // Print payslip
-  const handlePrint = () => {
-    const content = printRef.current?.innerHTML;
-    if (!content) return;
-    const win = window.open("", "_blank", "width=700,height=600");
-    if (!win) return;
-    win.document.write(`
-      <html><head><title>Payslip</title>
-      <style>
-        body { font-family: sans-serif; margin: 24px; font-size: 13px; }
-        * { box-sizing: border-box; }
-      </style></head>
-      <body>${content}</body></html>
-    `);
-    win.document.close();
-    win.focus();
-    win.print();
-    win.close();
+    setShowConfirm(true);
+    await fetchRuns();
   };
 
   return (
@@ -256,166 +353,119 @@ export default function Payroll() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Payroll</h1>
-          <p className="text-sm text-muted-foreground">{CURRENT_MONTH} — Monthly Payroll Cycle</p>
+          <p className="text-sm text-muted-foreground">{CURRENT_PERIOD} - Monthly Payroll Cycle</p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {runDone && <Badge variant="outline" className="border-green-400/50 text-green-700">Processed</Badge>}
-          {!runDone && <Badge variant="outline" className="border-primary/30 text-primary">Draft</Badge>}
-          <Button variant="outline" onClick={downloadCSV}>
-            <Download className="mr-2 h-4 w-4" /> Download CSV
-          </Button>
-          <Button onClick={handleRunPayroll} disabled={runDone || running}>
-            {running ? "Processing…" : runDone ? "Payroll Run ✓" : "Run Payroll"}
-          </Button>
-        </div>
+        {tab === "run" && (
+          <div className="flex items-center gap-2 flex-wrap">
+            {runDone
+              ? <Badge className="bg-green-100 text-green-800 border-0">Processed</Badge>
+              : <Badge variant="outline" className="border-primary/30 text-primary">Draft</Badge>}
+            <Button variant="outline" onClick={exportPayrollCsv}><Download className="mr-2 h-4 w-4" /> Download CSV</Button>
+            <Button onClick={handleRunPayroll} disabled={runDone || running}>
+              {running ? "Processing..." : runDone ? "Payroll Run Complete" : "Run Payroll"}
+            </Button>
+          </div>
+        )}
       </div>
 
-      {/* Summary */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard icon={Wallet} title="Gross Payroll" value={formatCurrency(totals.gross)} />
-        <StatCard icon={FileText} title="Total Deductions" value={formatCurrency(totals.paye + totals.nssf + totals.sha + totals.ahl + totals.nita)} />
-        <StatCard icon={CheckCircle} title="Net Payroll" value={formatCurrency(totals.net)} />
+      <div className="flex gap-1 rounded-lg border border-border bg-muted/30 p-1 w-fit">
+        {(["run", "history"] as const).map((value) => (
+          <button
+            key={value}
+            onClick={() => setTab(value)}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors capitalize ${tab === value ? "bg-card text-card-foreground shadow-sm" : "text-muted-foreground hover:text-card-foreground"}`}
+          >
+            {value === "run" ? "Run Payroll" : "Payroll History"}
+          </button>
+        ))}
       </div>
 
-      {/* Statutory Summary */}
-      <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-        <h3 className="mb-3 text-sm font-semibold text-card-foreground">Statutory Deductions Summary</h3>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-          {[
-            { label: "PAYE", value: totals.paye },
-            { label: "NSSF", value: totals.nssf },
-            { label: "SHA", value: totals.sha },
-            { label: "AHL", value: totals.ahl },
-            { label: "NITA", value: totals.nita },
-          ].map((item) => (
-            <div key={item.label} className="rounded-lg bg-muted/50 p-3 text-center">
-              <p className="text-xs text-muted-foreground">{item.label}</p>
-              <p className="mt-1 text-sm font-bold text-card-foreground">{formatCurrency(item.value)}</p>
+      {tab === "run" ? (
+        <>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <StatCard icon={Wallet} title="Gross Payroll" value={formatCurrency(totals.gross)} />
+            <StatCard icon={FileText} title="Total Deductions" value={formatCurrency(totals.paye + totals.nssf + totals.sha + totals.ahl + totals.nita)} />
+            <StatCard icon={CheckCircle} title="Net Payroll" value={formatCurrency(totals.net)} />
+          </div>
+
+          <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+            <h3 className="mb-3 text-sm font-semibold text-card-foreground">Statutory Deductions Summary</h3>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+              {[['PAYE', totals.paye], ['NSSF', totals.nssf], ['SHA', totals.sha], ['AHL', totals.ahl], ['NITA', totals.nita]].map(([label, value]) => (
+                <div key={label as string} className="rounded-lg bg-muted/50 p-3 text-center">
+                  <p className="text-xs text-muted-foreground">{label}</p>
+                  <p className="mt-1 text-sm font-bold text-card-foreground">{formatCurrency(value as number)}</p>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      </div>
+          </div>
 
-      {/* Filter */}
-      <div className="flex items-center gap-3">
-        <Select value={branchFilter} onValueChange={setBranchFilter}>
-          <SelectTrigger className="w-[200px]">
-            <SelectValue placeholder="All Branches" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Branches</SelectItem>
-            {branches.map((b) => (
-              <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+          <div className="flex items-center gap-3">
+            <Select value={branchFilter} onValueChange={setBranchFilter}>
+              <SelectTrigger className="w-[200px]"><SelectValue placeholder="All Branches" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map((branch) => <SelectItem key={branch.id} value={branch.id}>{branch.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
 
-      {/* Error */}
-      {error && (
-        <div className="rounded-lg bg-destructive/10 border border-destructive/30 p-4 text-sm text-destructive">{error}</div>
-      )}
+          {error && <div className="rounded-lg bg-destructive/10 border border-destructive/30 p-4 text-sm text-destructive">{error}</div>}
 
-      {/* Payroll Table */}
-      {loading ? (
-        <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden animate-pulse">
-          <div className="h-10 bg-muted/50 border-b border-border" />
-          {[...Array(6)].map((_, i) => (
-            <div key={i} className="flex gap-4 px-4 py-3 border-b border-border/50">
-              {[...Array(7)].map((__, j) => <div key={j} className="h-4 flex-1 rounded bg-muted" />)}
+          {loading ? (
+            <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden animate-pulse">
+              <div className="h-10 bg-muted/50 border-b border-border" />
+              {[...Array(6)].map((_, index) => (
+                <div key={index} className="flex gap-4 px-4 py-3 border-b border-border/50">{[...Array(7)].map((__, cell) => <div key={cell} className="h-4 flex-1 rounded bg-muted" />)}</div>
+              ))}
             </div>
-          ))}
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="rounded-xl border border-border bg-card p-10 text-center shadow-sm">
-          <p className="text-sm font-medium text-card-foreground">No payroll data</p>
-          <p className="text-xs text-muted-foreground mt-1">No employees found for the selected branch.</p>
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/50">
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Employee</th>
-                <th className="px-4 py-3 text-right font-medium text-muted-foreground">Gross</th>
-                <th className="px-4 py-3 text-right font-medium text-muted-foreground">PAYE</th>
-                <th className="px-4 py-3 text-right font-medium text-muted-foreground">NSSF</th>
-                <th className="px-4 py-3 text-right font-medium text-muted-foreground">SHA</th>
-                <th className="px-4 py-3 text-right font-medium text-muted-foreground">AHL</th>
-                <th className="px-4 py-3 text-right font-medium text-muted-foreground">NITA</th>
-                <th className="px-4 py-3 text-right font-medium text-muted-foreground">Net Pay</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((emp) => {
-                const p = calculatePayroll(emp);
-                return (
-                  <tr key={emp.id} className="border-b border-border/50 transition-colors hover:bg-muted/30">
-                    <td className="px-4 py-3">
-                      <p className="font-medium text-card-foreground">{emp.name}</p>
-                      <p className="text-xs text-muted-foreground">{emp.job_title}</p>
-                    </td>
-                    <td className="px-4 py-3 text-right text-card-foreground">{formatCurrency(p.gross)}</td>
-                    <td className="px-4 py-3 text-right text-card-foreground">{formatCurrency(p.paye)}</td>
-                    <td className="px-4 py-3 text-right text-card-foreground">{formatCurrency(p.nssf.employee)}</td>
-                    <td className="px-4 py-3 text-right text-card-foreground">{formatCurrency(p.sha)}</td>
-                    <td className="px-4 py-3 text-right text-card-foreground">{formatCurrency(p.ahl.employee)}</td>
-                    <td className="px-4 py-3 text-right text-card-foreground">{formatCurrency(p.nita.employee)}</td>
-                    <td className="px-4 py-3 text-right font-semibold text-primary">{formatCurrency(p.netPay)}</td>
-                    <td className="px-4 py-3">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 px-2 text-xs"
-                        onClick={() => setSelectedEmp(emp)}
-                      >
-                        <FileText className="h-3.5 w-3.5 mr-1" />
-                        Payslip
-                      </Button>
-                    </td>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-muted/50">
+                    {['Employee', 'Gross', 'PAYE', 'NSSF', 'SHA', 'AHL', 'NITA', 'Net Pay', 'Actions'].map((header) => (
+                      <th key={header} className={`px-4 py-3 font-medium text-muted-foreground ${header === 'Employee' || header === 'Actions' ? 'text-left' : 'text-right'}`}>{header}</th>
+                    ))}
                   </tr>
-                );
-              })}
-              {/* Totals row */}
-              <tr className="bg-muted/30 font-semibold border-t-2 border-border">
-                <td className="px-4 py-3 text-card-foreground">TOTALS</td>
-                <td className="px-4 py-3 text-right text-card-foreground">{formatCurrency(totals.gross)}</td>
-                <td className="px-4 py-3 text-right text-card-foreground">{formatCurrency(totals.paye)}</td>
-                <td className="px-4 py-3 text-right text-card-foreground">{formatCurrency(totals.nssf)}</td>
-                <td className="px-4 py-3 text-right text-card-foreground">{formatCurrency(totals.sha)}</td>
-                <td className="px-4 py-3 text-right text-card-foreground">{formatCurrency(totals.ahl)}</td>
-                <td className="px-4 py-3 text-right text-card-foreground">{formatCurrency(totals.nita)}</td>
-                <td className="px-4 py-3 text-right text-primary">{formatCurrency(totals.net)}</td>
-                <td />
-              </tr>
-            </tbody>
-          </table>
-        </div>
+                </thead>
+                <tbody>
+                  {filtered.map((employee) => {
+                    const payroll = calculatePayroll(employee);
+                    const branchName = branches.find((branch) => branch.id === employee.branch_id)?.name ?? "-";
+                    return (
+                      <tr key={employee.id} className="border-b border-border/50 hover:bg-muted/30">
+                        <td className="px-4 py-3"><p className="font-medium text-card-foreground">{employee.name}</p><p className="text-xs text-muted-foreground">{employee.job_title}</p></td>
+                        <td className="px-4 py-3 text-right text-card-foreground">{formatCurrency(payroll.gross)}</td>
+                        <td className="px-4 py-3 text-right text-card-foreground">{formatCurrency(payroll.paye)}</td>
+                        <td className="px-4 py-3 text-right text-card-foreground">{formatCurrency(payroll.nssf.employee)}</td>
+                        <td className="px-4 py-3 text-right text-card-foreground">{formatCurrency(payroll.sha)}</td>
+                        <td className="px-4 py-3 text-right text-card-foreground">{formatCurrency(payroll.ahl.employee)}</td>
+                        <td className="px-4 py-3 text-right text-card-foreground">{formatCurrency(payroll.nita.employee)}</td>
+                        <td className="px-4 py-3 text-right font-semibold text-primary">{formatCurrency(payroll.netPay)}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex gap-1">
+                            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => printPayslip(employee, branchName, CURRENT_PERIOD)}>
+                              <Printer className="h-3 w-3 mr-1" /> Print
+                            </Button>
+                            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => downloadPayslipPDF(employee, branchName, CURRENT_PERIOD)}>
+                              <Download className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      ) : (
+        <PayrollHistoryTab branches={branches} runs={runs} />
       )}
 
-      {/* Payslip Modal */}
-      <Dialog open={!!selectedEmp} onOpenChange={(open) => { if (!open) setSelectedEmp(null); }}>
-        <DialogContent className="max-w-2xl">
-          <div className="flex items-center justify-between mb-4">
-            <p className="text-sm font-semibold text-card-foreground">Payslip — {CURRENT_MONTH}</p>
-            <div className="flex gap-2">
-              <Button size="sm" variant="outline" onClick={handlePrint}>
-                <Printer className="mr-2 h-4 w-4" /> Print / PDF
-              </Button>
-            </div>
-          </div>
-          <div ref={printRef}>
-            {selectedEmp && (
-              <Payslip
-                emp={selectedEmp}
-                branchName={branches.find((b) => b.id === selectedEmp.branch_id)?.name ?? "—"}
-                period={CURRENT_MONTH}
-              />
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <RunConfirmModal open={showConfirm} onClose={() => setShowConfirm(false)} totals={totals} employees={employees} periodLabel={CURRENT_PERIOD} branches={branches} />
     </div>
   );
 }

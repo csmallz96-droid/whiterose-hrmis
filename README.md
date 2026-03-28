@@ -32,4 +32,4 @@ Internal use only. Contact HR for login credentials.
 NSSF Employer No: 2446614X
 
 ## Branches
-HQ (Mombasa) | KMH | Highrise | Kisumu-Kesia | Kisumu-Kondele | Busia | Kirinyaga | Eldoret | Mtwapa | Taita | Kwale
+HQ (Mombasa) | KNH | Highrise | Kisumu-Kesia | Kisumu-Kondele | Busia | Kirinyaga | Eldoret | Mtwapa | Taita | Kwale

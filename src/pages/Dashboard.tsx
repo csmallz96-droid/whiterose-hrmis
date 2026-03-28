@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Users, Wallet, CalendarDays, Building2, AlertTriangle } from "lucide-react";
 import StatCard from "@/components/StatCard";
 import { calculatePayroll } from "@/data/mockData";
 import { useBranches, useEmployees, useLeaveRequests } from "@/hooks/useSupabaseData";
 import { Badge } from "@/components/ui/badge";
-import { formatDate } from "@/lib/utils";
+import { formatDate, formatCurrency } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 
 function SkeletonCard() {
@@ -32,18 +32,31 @@ export default function Dashboard() {
   const error = branchesError || employeesError || leavesError;
 
   useEffect(() => {
-    supabase.from("contracts").select("employee_id, end_date").eq("status", "active").not("end_date", "is", null)
+    supabase
+      .from("contracts")
+      .select("employee_id, end_date")
+      .eq("status", "active")
+      .not("end_date", "is", null)
       .then(({ data }) => {
-        const expiring = (data ?? []).filter((c) => {
-          const d = daysUntil(c.end_date);
-          return d !== null && d <= 60 && d > 0;
+        const expiring = (data ?? []).filter((contract) => {
+          const days = daysUntil(contract.end_date);
+          return days !== null && days <= 60 && days > 0;
         });
         setExpiringContracts(expiring);
       });
   }, []);
 
-  const totalPayroll = employees.reduce((sum, emp) => sum + calculatePayroll(emp).gross, 0);
-  const pendingLeaves = leaveRequests.filter((l) => l.status === "Pending").length;
+  const totalPayroll = useMemo(() => employees.reduce((sum, employee) => sum + calculatePayroll(employee).gross, 0), [employees]);
+  const pendingLeaves = leaveRequests.filter((request) => request.status === "Pending").length;
+  const today = new Date().toISOString().slice(0, 10);
+  const employeesOnLeaveToday = leaveRequests
+    .filter((request) => request.status === "Approved" && request.start_date <= today && request.end_date >= today)
+    .map((request) => employees.find((employee) => employee.id === request.employee_id))
+    .filter(Boolean);
+  const leaveLiability = employees.reduce((sum, employee) => {
+    const dailyRate = employee.basic_salary / 30;
+    return sum + (employee.leave_balance * dailyRate);
+  }, 0);
 
   if (error) {
     return (
@@ -60,56 +73,88 @@ export default function Dashboard() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
-        <p className="text-sm text-muted-foreground">Whiterose Venyou Enterprises — Multi-Branch Overview</p>
+        <p className="text-sm text-muted-foreground">Whiterose Venyou Enterprises - Multi-Branch Overview</p>
       </div>
 
-      {/* Contract expiry alert */}
       {expiringContracts.length > 0 && (
         <div className="flex items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4">
           <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0" />
           <p className="text-sm text-amber-800 font-medium">
-            {expiringContracts.length} employee contract{expiringContracts.length > 1 ? "s" : ""} expiring within 60 days — review in{" "}
-            <a href="/contracts" className="underline">Contracts</a>
+            {expiringContracts.length} employee contract{expiringContracts.length > 1 ? "s" : ""} expiring within 60 days - review in <a href="/contracts" className="underline">Contracts</a>
           </p>
         </div>
       )}
 
-      {/* Top KPI Stats */}
       {loading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {[...Array(4)].map((_, i) => <SkeletonCard key={i} />)}
+          {[...Array(4)].map((_, index) => <SkeletonCard key={index} />)}
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard icon={Users} title="Total Headcount" value={employees.length} subtitle={`Across ${branches.length} locations`} />
           <StatCard icon={Building2} title="Total Branches" value={branches.length} subtitle="Active locations" />
           <StatCard icon={CalendarDays} title="Pending Leave" value={pendingLeaves} subtitle="Awaiting approval" />
-          <StatCard icon={Wallet} title="Monthly Payroll" value={`KES ${(totalPayroll / 1000).toFixed(0)}K`} subtitle="Gross payroll cost" />
+          <StatCard icon={Wallet} title="Monthly Payroll" value={formatCurrency(totalPayroll)} subtitle="Gross payroll cost" />
         </div>
       )}
 
-      {/* Branch Grid */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+          <h3 className="mb-4 text-sm font-semibold text-card-foreground">Who Is On Leave Today</h3>
+          {employeesOnLeaveToday.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No employees are on approved leave today.</p>
+          ) : (
+            <div className="space-y-3">
+              {employeesOnLeaveToday.map((employee) => (
+                <div key={employee?.id} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
+                  <div>
+                    <p className="text-sm font-medium text-card-foreground">{employee?.name}</p>
+                    <p className="text-xs text-muted-foreground">{employee?.job_title} | {branches.find((branch) => branch.id === employee?.branch_id)?.name ?? "-"}</p>
+                  </div>
+                  <Badge variant="outline">On Leave</Badge>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+          <h3 className="mb-4 text-sm font-semibold text-card-foreground">Leave Liability</h3>
+          <p className="text-3xl font-bold text-primary">{formatCurrency(leaveLiability)}</p>
+          <p className="text-sm text-muted-foreground mt-2">Estimated accrued unused leave days multiplied by daily salary.</p>
+          <div className="mt-4 space-y-3">
+            {employees.slice(0, 4).map((employee) => (
+              <div key={employee.id} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
+                <div>
+                  <p className="text-sm font-medium text-card-foreground">{employee.name}</p>
+                  <p className="text-xs text-muted-foreground">{employee.leave_balance} unused days</p>
+                </div>
+                <span className="text-sm font-semibold text-card-foreground">{formatCurrency((employee.basic_salary / 30) * employee.leave_balance)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
       <div>
         <h2 className="mb-4 text-lg font-semibold text-foreground">Branch Deployment</h2>
         {loading ? (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {[...Array(8)].map((_, i) => (
-              <div key={i} className="rounded-xl border border-border bg-card p-4 shadow-sm animate-pulse">
+            {[...Array(8)].map((_, index) => (
+              <div key={index} className="rounded-xl border border-border bg-card p-4 shadow-sm animate-pulse">
                 <div className="h-4 w-3/4 rounded bg-muted mb-3" />
                 <div className="grid grid-cols-3 gap-2">
-                  {[...Array(3)].map((_, j) => <div key={j} className="h-8 rounded bg-muted" />)}
+                  {[...Array(3)].map((_, cell) => <div key={cell} className="h-8 rounded bg-muted" />)}
                 </div>
               </div>
             ))}
           </div>
-        ) : branches.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No branches found.</p>
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {branches.map((branch) => {
-              const branchEmps = employees.filter((e) => e.branch_id === branch.id);
-              const branchPayroll = branchEmps.reduce((s, e) => s + calculatePayroll(e).gross, 0);
-              const branchOnLeave = branchEmps.filter((e) => e.status === "On Leave").length;
+              const branchEmployees = employees.filter((employee) => employee.branch_id === branch.id);
+              const branchPayroll = branchEmployees.reduce((sum, employee) => sum + calculatePayroll(employee).gross, 0);
+              const branchOnLeave = employeesOnLeaveToday.filter((employee) => employee?.branch_id === branch.id).length;
 
               return (
                 <div key={branch.id} className="rounded-xl border border-border bg-card p-4 shadow-sm">
@@ -118,16 +163,14 @@ export default function Dashboard() {
                       <Building2 className="h-4 w-4 text-primary shrink-0" />
                       <span className="text-sm font-semibold text-card-foreground truncate">
                         {branch.name}
-                        {branch.sub_location && (
-                          <span className="font-normal text-muted-foreground"> — {branch.sub_location}</span>
-                        )}
+                        {branch.sub_location && <span className="font-normal text-muted-foreground"> | {branch.sub_location}</span>}
                       </span>
                     </div>
                     <Badge variant="secondary" className="text-xs ml-1 shrink-0">{branch.region}</Badge>
                   </div>
                   <div className="mt-3 grid grid-cols-3 gap-2 text-center">
                     <div>
-                      <p className="text-lg font-bold text-card-foreground">{branchEmps.length}</p>
+                      <p className="text-lg font-bold text-card-foreground">{branchEmployees.length}</p>
                       <p className="text-[10px] text-muted-foreground">Staff</p>
                     </div>
                     <div>
@@ -135,9 +178,7 @@ export default function Dashboard() {
                       <p className="text-[10px] text-muted-foreground">On Leave</p>
                     </div>
                     <div>
-                      <p className="text-sm font-semibold text-card-foreground">
-                        {branchPayroll > 0 ? `${(branchPayroll / 1000).toFixed(0)}K` : "—"}
-                      </p>
+                      <p className="text-sm font-semibold text-card-foreground">{branchPayroll > 0 ? `${(branchPayroll / 1000).toFixed(0)}K` : "-"}</p>
                       <p className="text-[10px] text-muted-foreground">Payroll</p>
                     </div>
                   </div>
@@ -148,29 +189,22 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* Pending Approvals + Quick Stats */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
           <h3 className="mb-4 text-sm font-semibold text-card-foreground">Pending Leave Requests</h3>
           {loading ? (
-            <div className="space-y-3">
-              {[...Array(3)].map((_, i) => (
-                <div key={i} className="h-14 rounded-lg bg-muted animate-pulse" />
-              ))}
-            </div>
-          ) : leaveRequests.filter((l) => l.status === "Pending").length === 0 ? (
+            <div className="space-y-3">{[...Array(3)].map((_, index) => <div key={index} className="h-14 rounded-lg bg-muted animate-pulse" />)}</div>
+          ) : leaveRequests.filter((request) => request.status === "Pending").length === 0 ? (
             <p className="text-sm text-muted-foreground">No pending requests.</p>
           ) : (
             <div className="space-y-3">
-              {leaveRequests.filter((l) => l.status === "Pending").map((req) => {
-                const emp = employees.find((e) => e.id === req.employee_id);
+              {leaveRequests.filter((request) => request.status === "Pending").map((request) => {
+                const employee = employees.find((item) => item.id === request.employee_id);
                 return (
-                  <div key={req.id} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
+                  <div key={request.id} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
                     <div>
-                      <p className="text-sm font-medium text-card-foreground">{emp?.name ?? req.employee_id}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {req.type} Leave · {req.days} days · {formatDate(req.start_date)}
-                      </p>
+                      <p className="text-sm font-medium text-card-foreground">{employee?.name ?? request.employee_id}</p>
+                      <p className="text-xs text-muted-foreground">{request.type} Leave | {request.days} days | {formatDate(request.start_date)}</p>
                     </div>
                     <Badge variant="outline" className="text-xs border-amber-400/50 text-amber-600">Pending</Badge>
                   </div>
@@ -183,16 +217,14 @@ export default function Dashboard() {
         <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
           <h3 className="mb-4 text-sm font-semibold text-card-foreground">Quick Stats</h3>
           {loading ? (
-            <div className="space-y-3">
-              {[...Array(4)].map((_, i) => <div key={i} className="h-10 rounded-lg bg-muted animate-pulse" />)}
-            </div>
+            <div className="space-y-3">{[...Array(4)].map((_, index) => <div key={index} className="h-10 rounded-lg bg-muted animate-pulse" />)}</div>
           ) : (
             <div className="space-y-3">
               {[
-                { label: "Active Employees", value: employees.filter((e) => e.status === "Active").length },
-                { label: "Permanent Staff", value: employees.filter((e) => e.employment_type === "Permanent").length },
-                { label: "Contract Staff", value: employees.filter((e) => e.employment_type === "Contract").length },
-                { label: "Casual Staff", value: employees.filter((e) => e.employment_type === "Casual").length },
+                { label: "Active Employees", value: employees.filter((employee) => employee.status === "Active").length },
+                { label: "Permanent Staff", value: employees.filter((employee) => employee.employment_type === "Permanent").length },
+                { label: "Contract Staff", value: employees.filter((employee) => employee.employment_type === "Contract").length },
+                { label: "Casual Staff", value: employees.filter((employee) => employee.employment_type === "Casual").length },
               ].map((stat) => (
                 <div key={stat.label} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
                   <span className="text-sm text-muted-foreground">{stat.label}</span>

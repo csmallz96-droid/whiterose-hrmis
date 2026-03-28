@@ -1,82 +1,24 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { useEmployees, useBranches } from "@/hooks/useSupabaseData";
+import { useBranches, useEmployees } from "@/hooks/useSupabaseData";
 import { calculatePayroll } from "@/data/mockData";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { FileText, Printer, Search } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Download, FileText, Printer, Search } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
-import { formatDate, formatCurrency } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { downloadPayslipPDF, printPayslip } from "@/utils/downloadPayslipPDF";
+
 
 type Payslip = Tables<"payslips">;
 type Employee = Tables<"employees">;
 
-const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-function PayslipView({ slip, employee, branchName }: { slip: Payslip; employee: Employee; branchName: string }) {
-  const period = `${MONTHS[slip.period_month - 1]} ${slip.period_year}`;
-  return (
-    <div id="payslip-print" className="bg-white text-gray-900 font-sans" style={{ minWidth: 480 }}>
-      <div className="flex items-center justify-between border-b-2 border-[#2B3990] pb-4 mb-4">
-        <div className="flex items-center gap-3">
-          <img src="/logo.jpeg" alt="Whiterose" className="h-12 w-auto rounded" />
-          <div>
-            <p className="font-bold text-[#2B3990] text-base leading-tight">Whiterose Venyou Enterprises Ltd</p>
-            <p className="text-xs text-gray-500">P.O Box 514-80401, Mombasa · NSSF No: 2446614X</p>
-          </div>
-        </div>
-        <div className="text-right">
-          <p className="font-bold text-sm text-[#2B3990]">PAYSLIP</p>
-          <p className="text-xs text-gray-500">Pay Period: {period}</p>
-        </div>
-      </div>
-      <div className="grid grid-cols-2 gap-x-6 gap-y-1 mb-4 text-sm">
-        {[
-          ["Employee ID", employee.id], ["Name", employee.name],
-          ["Job Title", employee.job_title], ["Branch", branchName],
-          ["Department", employee.department], ["KRA PIN", employee.kra_pin],
-          ["NSSF No.", employee.nssf_no], ["NHIF No.", employee.nhif_no],
-        ].map(([label, value]) => (
-          <div key={label as string} className="flex gap-2">
-            <span className="text-gray-500 min-w-[90px]">{label}:</span>
-            <span className="font-medium">{value}</span>
-          </div>
-        ))}
-      </div>
-      <div className="grid grid-cols-2 gap-6 mb-4">
-        <div>
-          <p className="text-xs font-bold uppercase text-[#2B3990] mb-2 border-b border-gray-200 pb-1">Earnings</p>
-          <div className="space-y-1 text-sm">
-            {[["Basic Salary", slip.basic_salary], ["House Allowance", slip.house_allowance], ["Transport Allowance", slip.transport_allowance]].map(([l, v]) => (
-              <div key={l as string} className="flex justify-between"><span className="text-gray-600">{l}</span><span>{formatCurrency(v as number)}</span></div>
-            ))}
-            <div className="flex justify-between font-bold border-t border-gray-200 pt-1 mt-1">
-              <span>Gross Pay</span><span>{formatCurrency(slip.gross_salary)}</span>
-            </div>
-          </div>
-        </div>
-        <div>
-          <p className="text-xs font-bold uppercase text-[#2B3990] mb-2 border-b border-gray-200 pb-1">Deductions</p>
-          <div className="space-y-1 text-sm">
-            {[["PAYE", slip.paye], ["NSSF (Employee)", slip.nssf], ["SHA (2.75%)", slip.sha], ["AHL (1.5%)", slip.ahl], ["NITA", slip.nita], ["Other", slip.other_deductions]].map(([l, v]) => (
-              <div key={l as string} className="flex justify-between"><span className="text-gray-600">{l}</span><span className="text-red-600">{formatCurrency(v as number)}</span></div>
-            ))}
-            <div className="flex justify-between text-xs text-gray-500 mt-1">
-              <span>Total Deductions</span>
-              <span>{formatCurrency(slip.gross_salary - slip.net_salary)}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div className="flex justify-between items-center bg-[#2B3990] text-white rounded-lg px-4 py-3">
-        <span className="font-bold text-sm">NET PAY</span>
-        <span className="font-bold text-lg">{formatCurrency(slip.net_salary, 2)}</span>
-      </div>
-      <p className="text-center text-xs text-gray-400 mt-3">Generated by Whiterose HRMIS · Computer generated — no signature required</p>
-    </div>
-  );
+function getPeriodLabel(periodMonth: number, periodYear: number) {
+  return `${MONTHS[periodMonth - 1]} ${periodYear}`;
 }
 
 export default function Payslips() {
@@ -88,76 +30,81 @@ export default function Payslips() {
   const [branchFilter, setBranchFilter] = useState("all");
   const [monthFilter, setMonthFilter] = useState("all");
   const [selected, setSelected] = useState<Payslip | null>(null);
-  const printRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    supabase.from("payslips").select("*").order("created_at", { ascending: false })
-      .then(({ data }) => { setPayslips(data ?? []); setLoading(false); });
+    supabase
+      .from("payslips")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .then(({ data }) => {
+        setPayslips(data ?? []);
+        setLoading(false);
+      });
   }, []);
 
-  // If no saved payslips, generate from current employees for March 2026
-  const displayPayslips = payslips.length > 0 ? payslips : employees.map((emp) => {
-    const p = calculatePayroll(emp);
-    return {
-      id: emp.id,
-      payroll_run_id: null,
-      employee_id: emp.id,
-      period_month: 3,
-      period_year: 2026,
-      gross_salary: p.gross,
-      basic_salary: emp.basic_salary,
-      house_allowance: emp.house_allowance,
-      transport_allowance: emp.transport_allowance,
-      paye: p.paye,
-      nssf: p.nssf.employee,
-      sha: p.sha,
-      ahl: p.ahl.employee,
-      nita: p.nita.employee,
-      other_deductions: 0,
-      net_salary: p.netPay,
-      created_at: new Date().toISOString(),
-    } as Payslip;
+  const displayPayslips = payslips.length > 0
+    ? payslips
+    : employees.map((emp) => {
+        const p = calculatePayroll(emp);
+        return {
+          id: emp.id,
+          payroll_run_id: null,
+          employee_id: emp.id,
+          period_month: 3,
+          period_year: 2026,
+          gross_salary: p.gross,
+          basic_salary: emp.basic_salary,
+          house_allowance: emp.house_allowance,
+          transport_allowance: emp.transport_allowance,
+          paye: p.paye,
+          nssf: p.nssf.employee,
+          sha: p.sha,
+          ahl: p.ahl.employee,
+          nita: p.nita.employee,
+          other_deductions: 0,
+          net_salary: p.netPay,
+          created_at: new Date().toISOString(),
+        } as Payslip;
+      });
+
+  const filtered = displayPayslips.filter((slip) => {
+    const employee = employees.find((emp) => emp.id === slip.employee_id);
+    const branch = branches.find((item) => item.id === employee?.branch_id);
+    const searchTerm = search.trim().toLowerCase();
+
+    const matchesSearch = !searchTerm
+      || employee?.name.toLowerCase().includes(searchTerm)
+      || slip.employee_id.toLowerCase().includes(searchTerm)
+      || employee?.job_title.toLowerCase().includes(searchTerm);
+    const matchesBranch = branchFilter === "all" || branch?.id === branchFilter;
+    const matchesMonth = monthFilter === "all" || `${slip.period_month}-${slip.period_year}` === monthFilter;
+
+    return !!matchesSearch && matchesBranch && matchesMonth;
   });
 
-  const filtered = displayPayslips.filter((s) => {
-    const emp = employees.find((e) => e.id === s.employee_id);
-    const branch = branches.find((b) => b.id === emp?.branch_id);
-    const matchSearch = !search || emp?.name.toLowerCase().includes(search.toLowerCase()) || false;
-    const matchBranch = branchFilter === "all" || branch?.id === branchFilter;
-    const matchMonth = monthFilter === "all" || `${s.period_month}-${s.period_year}` === monthFilter;
-    return matchSearch && matchBranch && matchMonth;
-  });
-
-  const handlePrint = () => {
-    const content = printRef.current?.innerHTML;
-    if (!content) return;
-    const win = window.open("", "_blank", "width=700,height=600");
-    if (!win) return;
-    win.document.write(`<html><head><title>Payslip</title><style>body{font-family:sans-serif;margin:24px;font-size:13px}*{box-sizing:border-box}</style></head><body>${content}</body></html>`);
-    win.document.close(); win.focus(); win.print(); win.close();
-  };
-
-  const selectedEmp = selected ? employees.find((e) => e.id === selected.employee_id) : null;
-  const selectedBranch = selectedEmp ? branches.find((b) => b.id === selectedEmp.branch_id) : null;
+  const selectedEmployee = selected ? employees.find((emp) => emp.id === selected.employee_id) : null;
+  const selectedBranchName = selectedEmployee
+    ? branches.find((branch) => branch.id === selectedEmployee.branch_id)?.name ?? "-"
+    : "-";
+  const selectedPeriod = selected ? getPeriodLabel(selected.period_month, selected.period_year) : "";
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Payslips</h1>
-        <p className="text-sm text-muted-foreground">View and download employee payslips</p>
+        <p className="text-sm text-muted-foreground">View, print, and export branded employee payslips</p>
       </div>
 
-      {/* Filters */}
       <div className="flex flex-wrap gap-3">
-        <div className="relative flex-1 min-w-[200px] max-w-sm">
+        <div className="relative flex-1 min-w-[220px] max-w-sm">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input placeholder="Search employee…" className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <Input placeholder="Search employee..." className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
         <Select value={branchFilter} onValueChange={setBranchFilter}>
           <SelectTrigger className="w-[180px]"><SelectValue placeholder="All Branches" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Branches</SelectItem>
-            {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+            {branches.map((branch) => <SelectItem key={branch.id} value={branch.id}>{branch.name}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={monthFilter} onValueChange={setMonthFilter}>
@@ -189,27 +136,39 @@ export default function Payslips() {
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Period</th>
                 <th className="px-4 py-3 text-right font-medium text-muted-foreground">Gross</th>
                 <th className="px-4 py-3 text-right font-medium text-muted-foreground">Net Pay</th>
-                <th className="px-4 py-3" />
+                <th className="px-4 py-3 text-right font-medium text-muted-foreground">Actions</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((slip) => {
-                const emp = employees.find((e) => e.id === slip.employee_id);
-                const branch = branches.find((b) => b.id === emp?.branch_id);
+                const employee = employees.find((emp) => emp.id === slip.employee_id);
+                const branchName = branches.find((branch) => branch.id === employee?.branch_id)?.name ?? "-";
+                const period = getPeriodLabel(slip.period_month, slip.period_year);
+
                 return (
                   <tr key={slip.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
                     <td className="px-4 py-3">
-                      <p className="font-medium text-card-foreground">{emp?.name ?? slip.employee_id}</p>
-                      <p className="text-xs text-muted-foreground">{emp?.job_title}</p>
+                      <p className="font-medium text-card-foreground">{employee?.name ?? slip.employee_id}</p>
+                      <p className="text-xs text-muted-foreground">{employee?.job_title ?? ""}</p>
                     </td>
-                    <td className="px-4 py-3 text-card-foreground">{branch?.name ?? "—"}</td>
-                    <td className="px-4 py-3 text-card-foreground">{MONTHS[slip.period_month - 1]} {slip.period_year}</td>
+                    <td className="px-4 py-3 text-card-foreground">{branchName}</td>
+                    <td className="px-4 py-3 text-card-foreground">{period}</td>
                     <td className="px-4 py-3 text-right text-card-foreground">{formatCurrency(slip.gross_salary)}</td>
                     <td className="px-4 py-3 text-right font-semibold text-primary">{formatCurrency(slip.net_salary)}</td>
                     <td className="px-4 py-3">
-                      <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setSelected(slip)}>
-                        <FileText className="h-3.5 w-3.5 mr-1" /> View
-                      </Button>
+                      {employee && (
+                        <div className="flex justify-end gap-1">
+                          <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => setSelected(slip)}>
+                            <FileText className="h-3.5 w-3.5 mr-1" /> View
+                          </Button>
+                          <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => printPayslip(employee, branchName, period)}>
+                            <Printer className="h-3.5 w-3.5 mr-1" /> Print
+                          </Button>
+                          <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => downloadPayslipPDF(employee, branchName, period)}>
+                            <Download className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 );
@@ -220,16 +179,27 @@ export default function Payslips() {
       )}
 
       <Dialog open={!!selected} onOpenChange={(open) => { if (!open) setSelected(null); }}>
-        <DialogContent className="max-w-2xl">
-          <div className="flex items-center justify-between mb-4">
-            <p className="text-sm font-semibold text-card-foreground">Payslip</p>
-            <Button size="sm" variant="outline" onClick={handlePrint}><Printer className="mr-2 h-4 w-4" /> Print / PDF</Button>
-          </div>
-          <div ref={printRef}>
-            {selected && selectedEmp && (
-              <PayslipView slip={selected} employee={selectedEmp} branchName={selectedBranch?.name ?? "—"} />
-            )}
-          </div>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Payslip Actions</DialogTitle>
+          </DialogHeader>
+          {selected && selectedEmployee && (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-border bg-muted/30 p-4">
+                <p className="text-sm font-medium text-card-foreground">{selectedEmployee.name}</p>
+                <p className="text-xs text-muted-foreground">{selectedBranchName} | {selectedPeriod}</p>
+                <p className="mt-2 text-sm text-card-foreground">Net Pay: <span className="font-semibold text-primary">{formatCurrency(selected.net_salary)}</span></p>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => printPayslip(selectedEmployee, selectedBranchName, selectedPeriod)}>
+                  <Printer className="mr-2 h-4 w-4" /> Print
+                </Button>
+                <Button onClick={() => downloadPayslipPDF(selectedEmployee, selectedBranchName, selectedPeriod)}>
+                  <Download className="mr-2 h-4 w-4" /> Download PDF
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

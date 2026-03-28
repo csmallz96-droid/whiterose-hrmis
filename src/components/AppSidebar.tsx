@@ -23,13 +23,15 @@ const ALL_NAV: NavItem[] = [
   { to: "/settings", icon: Settings, label: "Settings" },
 ];
 
-const MANAGER_NAV = ["/", "/employees", "/leave", "/performance", "/self-service", "/expenses"];
-const EMPLOYEE_NAV = ["/", "/self-service", "/leave", "/payslips", "/expenses"];
+const MANAGER_PATHS = ["/", "/employees", "/leave", "/performance", "/self-service", "/expenses"];
+const EMPLOYEE_NAV: NavItem[] = [
+  { to: "/self-service", icon: UserCircle, label: "My Portal" },
+];
 
 function getNavItems(role: string): NavItem[] {
   if (role === "admin" || role === "hr") return ALL_NAV;
-  if (role === "manager") return ALL_NAV.filter((n) => MANAGER_NAV.includes(n.to));
-  return ALL_NAV.filter((n) => EMPLOYEE_NAV.includes(n.to));
+  if (role === "manager") return ALL_NAV.filter((n) => MANAGER_PATHS.includes(n.to));
+  return EMPLOYEE_NAV;
 }
 
 function getInitials(name: string) {
@@ -56,6 +58,7 @@ export default function AppSidebar({ open, onClose }: AppSidebarProps) {
   const { employee, role, signOut } = useAuth();
   const navItems = getNavItems(role);
   const roleBadge = getRoleBadge(role);
+  const isEmployee = role === "employee";
 
   const sidebarContent = (
     <aside className="flex h-full w-64 flex-col bg-sidebar text-sidebar-foreground overflow-y-auto">
@@ -92,6 +95,15 @@ export default function AppSidebar({ open, onClose }: AppSidebarProps) {
         })}
       </nav>
 
+      {/* Employee info + branch (shown for employee role) */}
+      {isEmployee && employee && (
+        <div className="px-4 py-2 border-t border-sidebar-border/50">
+          <p className="text-[10px] text-sidebar-foreground/40 uppercase tracking-wider mb-1">My Info</p>
+          <p className="text-xs text-sidebar-foreground/70">{employee.job_title}</p>
+          <p className="text-xs text-sidebar-foreground/50">{employee.branch_id?.toUpperCase()}</p>
+        </div>
+      )}
+
       {/* User footer */}
       <div className="shrink-0 border-t border-sidebar-border p-4 space-y-3">
         <div className="flex items-center gap-3">
@@ -121,12 +133,9 @@ export default function AppSidebar({ open, onClose }: AppSidebarProps) {
 
   return (
     <>
-      {/* Desktop */}
       <div className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:z-30 lg:flex lg:w-64">
         {sidebarContent}
       </div>
-
-      {/* Mobile */}
       {open && (
         <>
           <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={onClose} aria-hidden="true" />
